@@ -1,0 +1,7 @@
+{
+  "testEnvironment": "node",
+  "testMatch": ["**/src/**/*.test.js"],
+  "setupFilesAfterEnv": [],
+  "moduleFileExtensions": ["js", "json"],
+  "transform": {"^.+\\.js$": "babel-jest"}
+}
