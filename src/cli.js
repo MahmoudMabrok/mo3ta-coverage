@@ -150,13 +150,8 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
   });
 
   // Cumulative coverage check
-  if (COVERAGE_LIMIT > 0 && totalChanged > 0) {
-    const overallCoverage = ((totalChanged - totalUncovered) / totalChanged) * 100;
-    console.log(`\n🔢 Overall coverage for all changed lines: ${overallCoverage.toFixed(2)}%`);
-    if (overallCoverage >= COVERAGE_LIMIT) {
-      console.log(`   ✅ Overall coverage meets the limit with value: ${overallCoverage}%`);
-    } else {
-      console.log(`   🚨 Overall coverage below limit (${overallCoverage}%) should be (${COVERAGE_LIMIT}%)`);
-    }
+  if (totalChanged > 0) {
+    const overallCoverage = (((totalChanged - totalUncovered) / totalChanged) * 100).toFixed(2);
+    console.log(`\n🔢 Overall coverage for all changed lines: ${overallCoverage}% limit is ${COVERAGE_LIMIT}%`);
   }
 }
