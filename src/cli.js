@@ -129,7 +129,7 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
   changedFiles.forEach(relPath => {
     const absPath = path.resolve(relPath);
     if (!uncoveredLines[absPath]) {
-      console.log(`⚠️  No coverage info for: ${relPath}`);
+      console.log(`⚠️  No coverage info for: ${absPath}`);
       return;
     }
 
@@ -137,16 +137,23 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
     const fileUncovered = uncoveredLines[absPath];
 
     const uncoveredInDiff = addedLines.filter(line => fileUncovered.has(line));
+    const coveredInDiff = addedLines.length - uncoveredInDiff.length;
 
     totalChanged += addedLines.length;
     totalUncovered += uncoveredInDiff.length;
 
-    if (uncoveredInDiff.length > 0) {
-      console.log(`🚨 ${relPath} - Uncovered changed lines: [${uncoveredInDiff.join(', ')}]`);
-    } else {
-      console.log(`✅ ${relPath} - All changed lines are covered`);
+    if (addedLines.length === 0) {
+      console.log(`ℹ️  ${absPath} - No changed lines detected.`);
+      return;
     }
-    console.log(`   Coverage for changed lines: ${addedLines.length > 0 ? ((addedLines.length - uncoveredInDiff.length) / addedLines.length * 100).toFixed(2) : '100.00'}%`);
+
+    if (uncoveredInDiff.length > 0) {
+      console.log(`🚨 ${absPath} - Uncovered changed lines: [${uncoveredInDiff.join(', ')}]`);
+    } else {
+      console.log(`✅ ${absPath} - All changed lines are covered`);
+    }
+    console.log(`   Total changed lines: ${addedLines.length}, Covered: ${coveredInDiff}, Uncovered: ${uncoveredInDiff.length}`);
+    console.log(`   Coverage for changed lines: ${((coveredInDiff / addedLines.length) * 100).toFixed(2)}%`);
   });
 
   // Cumulative coverage check
