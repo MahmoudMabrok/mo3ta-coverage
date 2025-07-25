@@ -1,20 +1,29 @@
-
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { exit } from 'process';
 
 export function main(options) {
+   // Check if current directory is a git repository
+  try {
+    execSync('git rev-parse --is-inside-work-tree', { stdio: 'ignore' });
+  } catch (err) {
+    console.error(`❌ Not a git repository. Please run this tool inside a git repo. ${err.message}`);
+
+    exit(1);
+  }
+
+
   const BASE_BRANCH = options.base;
   const LCOV_PATH = options.lcov;
   const COVERAGE_LIMIT = parseFloat(options.limit);
+  const SHOW_COVERED = options.showCovered === true || options.showCovered === 'true';
 
-  // log the options for debugging
-
-  console.log(`Options: Base Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT}`);
+  console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED}`);
 
   const changedFiles = getChangedFiles(BASE_BRANCH);
   runRelatedTests(changedFiles);
-  reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT);
+  reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED);
 
 }
 
@@ -28,28 +37,30 @@ function getChangedFiles(BASE_BRANCH) {
 function runRelatedTests(files) {
   if (files.length === 0) {
     console.log('✅ No changed source files found.');
-    return;
+
+    exit(0);
   }
 
-  console.log('🧪 Running tests related to changed files:\n', files.join('\n'));
+  console.log('🧪 Running tests related to the changed files:\n', files.join('\n'));
 
   // filter files to only those that are JavaScript or TypeScript files
   files = getJsOnlyFiles(files);
 
   if (files.length === 0) {
     console.log('✅ No relevant files found for testing.');
-    return;
+    
+    exit(0);
   }
 
   // log files to be tested
-  console.log('Files to be tested:', files.join(', '));
+  console.log('Files to be tested:', files.join('\n'));
 
   const command = `npx jest --findRelatedTests --passWithNoTests --coverage ${files.join(' ')}`;
   try {
     execSync(command, { stdio: 'inherit' });
   } catch (err) {
-    console.error('❌ Some tests failed.');
-    process.exit(1);
+    console.error('Error:', err.message || err);
+    exit(1);
   }
 }
 
@@ -57,7 +68,7 @@ function getJsOnlyFiles(files) {
   // Only include source code files, exclude test, config, and json files
   return files.filter(f => {
     // Exclude test files
-    if (f.match(/(\.test|\.spec)\.(js|ts|jsx|tsx)$/)) return false;
+    // if (f.match(/(\.test|\.spec)\.(js|ts|jsx|tsx)$/)) return false;
     // Exclude config files
     if (f.match(/(jest|babel|webpack|tsconfig|eslint|prettier|rollup|vite|package)\.(js|ts|json)$/)) return false;
     // Exclude json files
@@ -104,7 +115,7 @@ function parseLcov(LCOV_PATH) {
   return files;
 }
 
-function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT) {
+function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED) {
   if (!fs.existsSync(LCOV_PATH)) {
     console.error('❌ lcov.info not found. Make sure coverage ran correctly.');
     process.exit(1);
@@ -152,7 +163,12 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
     } else {
       console.log(`✅ ${absPath} - All changed lines are covered`);
     }
+    // Display covered lines if option is enabled
+    const coveredLines = addedLines.filter(line => !fileUncovered.has(line));
     console.log(`   Total changed lines: ${addedLines.length}, Covered: ${coveredInDiff}, Uncovered: ${uncoveredInDiff.length}`);
+    if (SHOW_COVERED) {
+      console.log(`   Covered lines: [${coveredLines.join(', ')}]`);
+    }
     console.log(`   Coverage for changed lines: ${((coveredInDiff / addedLines.length) * 100).toFixed(2)}%`);
   });
 
