@@ -1,11 +1,24 @@
+
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
 
-const BASE_BRANCH = 'main';
-const LCOV_PATH = path.resolve('coverage/lcov.info');
+export function main(options) {
+  const BASE_BRANCH = options.base;
+  const LCOV_PATH = options.lcov;
+  const COVERAGE_LIMIT = parseFloat(options.limit);
 
-function getChangedFiles() {
+  // log the options for debugging
+
+  console.log(`Options: Base Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT}`);
+
+  const changedFiles = getChangedFiles(BASE_BRANCH);
+  runRelatedTests(changedFiles);
+  reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT);
+
+}
+
+function getChangedFiles(BASE_BRANCH) {
   const output = execSync(`git diff --name-only ${BASE_BRANCH}`).toString();
   return output
     .split('\n')
@@ -20,7 +33,18 @@ function runRelatedTests(files) {
 
   console.log('🧪 Running tests related to changed files:\n', files.join('\n'));
 
-  const command = `npx jest --findRelatedTests --coverage ${files.join(' ')}`;
+  // filter files to only those that are JavaScript or TypeScript files
+  files = getJsOnlyFiles(files);
+
+  if (files.length === 0) {
+    console.log('✅ No relevant files found for testing.');
+    return;
+  }
+
+  // log files to be tested
+  console.log('Files to be tested:', files.join(', '));
+
+  const command = `npx jest --findRelatedTests --passWithNoTests --coverage ${files.join(' ')}`;
   try {
     execSync(command, { stdio: 'inherit' });
   } catch (err) {
@@ -29,7 +53,21 @@ function runRelatedTests(files) {
   }
 }
 
-function getChangedLines(filePath) {
+function getJsOnlyFiles(files) {
+  // Only include source code files, exclude test, config, and json files
+  return files.filter(f => {
+    // Exclude test files
+    if (f.match(/(\.test|\.spec)\.(js|ts|jsx|tsx)$/)) return false;
+    // Exclude config files
+    if (f.match(/(jest|babel|webpack|tsconfig|eslint|prettier|rollup|vite|package)\.(js|ts|json)$/)) return false;
+    // Exclude json files
+    if (f.endsWith('.json')) return false;
+    // Only include code files
+    return f.endsWith('.js') || f.endsWith('.ts') || f.endsWith('.jsx') || f.endsWith('.tsx');
+  });
+}
+
+function getChangedLines(filePath, BASE_BRANCH) {
   const diff = execSync(`git diff -U0 ${BASE_BRANCH} -- ${filePath}`).toString();
   const lines = [];
 
@@ -46,7 +84,7 @@ function getChangedLines(filePath) {
   return lines;
 }
 
-function parseLcov() {
+function parseLcov(LCOV_PATH) {
   const lcovRaw = fs.readFileSync(LCOV_PATH, 'utf8');
   const files = {};
   let currentFile = null;
@@ -66,15 +104,27 @@ function parseLcov() {
   return files;
 }
 
-function reportUncoveredChangedLines(changedFiles) {
+function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT) {
   if (!fs.existsSync(LCOV_PATH)) {
     console.error('❌ lcov.info not found. Make sure coverage ran correctly.');
     process.exit(1);
   }
 
-  const uncoveredLines = parseLcov();
+  const uncoveredLines = parseLcov(LCOV_PATH);
 
   console.log(`\n🔍 Checking coverage of changed lines vs branch: ${BASE_BRANCH}\n`);
+
+  changedFiles = getJsOnlyFiles(changedFiles);
+
+  if (changedFiles.length === 0) {
+    console.log('✅ No relevant files found for coverage check.');
+    return;
+  }
+
+  console.log('Files with changed lines:', changedFiles.join(', '));
+
+  let totalChanged = 0;
+  let totalUncovered = 0;
 
   changedFiles.forEach(relPath => {
     const absPath = path.resolve(relPath);
@@ -83,19 +133,30 @@ function reportUncoveredChangedLines(changedFiles) {
       return;
     }
 
-    const addedLines = getChangedLines(relPath);
+    const addedLines = getChangedLines(relPath, BASE_BRANCH);
     const fileUncovered = uncoveredLines[absPath];
 
     const uncoveredInDiff = addedLines.filter(line => fileUncovered.has(line));
+
+    totalChanged += addedLines.length;
+    totalUncovered += uncoveredInDiff.length;
 
     if (uncoveredInDiff.length > 0) {
       console.log(`🚨 ${relPath} - Uncovered changed lines: [${uncoveredInDiff.join(', ')}]`);
     } else {
       console.log(`✅ ${relPath} - All changed lines are covered`);
     }
+    console.log(`   Coverage for changed lines: ${addedLines.length > 0 ? ((addedLines.length - uncoveredInDiff.length) / addedLines.length * 100).toFixed(2) : '100.00'}%`);
   });
-}
 
-const changedFiles = getChangedFiles();
-runRelatedTests(changedFiles);
-reportUncoveredChangedLines(changedFiles);
+  // Cumulative coverage check
+  if (COVERAGE_LIMIT > 0 && totalChanged > 0) {
+    const overallCoverage = ((totalChanged - totalUncovered) / totalChanged) * 100;
+    console.log(`\n🔢 Overall coverage for all changed lines: ${overallCoverage.toFixed(2)}%`);
+    if (overallCoverage >= COVERAGE_LIMIT) {
+      console.log(`   ✅ Overall coverage meets the limit with value: ${overallCoverage}%`);
+    } else {
+      console.log(`   🚨 Overall coverage below limit (${overallCoverage}%) should be (${COVERAGE_LIMIT}%)`);
+    }
+  }
+}

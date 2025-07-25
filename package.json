@@ -1,10 +1,10 @@
 {
-  "name": "changed-tests-cli",
+  "name": "mo3ta-coverage",
   "version": "1.0.0",
   "description": "Run tests and report uncovered changed lines in a PR",
   "main": "index.js",
   "bin": {
-    "changed-tests": "./index.js"
+    "mo3ta-coverage": "./index.js"
   },
   "scripts": {},
   "author": "Mahmoud Mabrok",
@@ -15,5 +15,8 @@
     "@babel/preset-env": "^7.28.0",
     "babel-jest": "^30.0.5",
     "jest": "^30.0.5"
+  },
+  "dependencies": {
+    "commander": "^14.0.0"
   }
 }
