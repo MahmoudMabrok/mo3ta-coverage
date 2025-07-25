@@ -22,8 +22,45 @@ export function main(options) {
   console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED}`);
 
   const changedFiles = getChangedFiles(BASE_BRANCH);
-  runRelatedTests(changedFiles);
-  reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED);
+  let codeFiles = getJsOnlyFiles(changedFiles);
+  const testFiles = changedFiles.filter(f => f.match(/(\.test|\.spec)\.(js|ts|jsx|tsx)$/));
+
+  // If no code files, try to find associated code files for test files
+  if (codeFiles.length === 0 && testFiles.length > 0) {
+    const associatedCodeFiles = [];
+    testFiles.forEach(testFile => {
+      const codeFile = findAssociatedCodeFile(testFile);
+      if (codeFile && fs.existsSync(codeFile)) {
+        associatedCodeFiles.push(codeFile);
+      }
+    });
+    if (associatedCodeFiles.length > 0) {
+      codeFiles = associatedCodeFiles;
+    }
+  }
+
+  // Merge codeFiles and testFiles for running related tests
+  const filesToTest = [...codeFiles, ...testFiles];
+  runRelatedTests(filesToTest);
+  reportUncoveredChangedLines(codeFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED);
+// Helper to find code file associated with a test file
+function findAssociatedCodeFile(testFile) {
+  // Remove .test or .spec from filename
+  const exts = ['.js', '.ts', '.jsx', '.tsx'];
+  const base = testFile.replace(/(\.test|\.spec)(?=\.(js|ts|jsx|tsx)$)/, '');
+  for (const ext of exts) {
+    if (base.endsWith(ext)) {
+      return base;
+    }
+  }
+  // If not found, try replacing extension
+  for (const ext of exts) {
+    if (testFile.endsWith(ext)) {
+      return testFile.replace(/(\.test|\.spec)?\.(js|ts|jsx|tsx)$/, ext);
+    }
+  }
+  return null;
+}
 
 }
 
