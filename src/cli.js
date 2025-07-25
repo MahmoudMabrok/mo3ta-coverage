@@ -28,7 +28,14 @@ export function main(options) {
 }
 
 function getChangedFiles(BASE_BRANCH) {
-  const output = execSync(`git diff --name-only ${BASE_BRANCH}`).toString();
+  const command = `(
+    git log --pretty=format: --name-only --diff-filter=AM --author="$(git config user.name)" $(git merge-base HEAD ${BASE_BRANCH})..HEAD
+    git diff --name-only --diff-filter=AM
+    git diff --cached --name-only --diff-filter=AM
+  ) | sort -u`;
+  
+  const output = execSync(command).toString();
+
   return output
     .split('\n')
     .filter(f => f.trim().length > 0 && f.match(/\.(js|ts|jsx|tsx)$/));
@@ -68,7 +75,7 @@ function getJsOnlyFiles(files) {
   // Only include source code files, exclude test, config, and json files
   return files.filter(f => {
     // Exclude test files
-    // if (f.match(/(\.test|\.spec)\.(js|ts|jsx|tsx)$/)) return false;
+    if (f.match(/(\.test|\.spec)\.(js|ts|jsx|tsx)$/)) return false;
     // Exclude config files
     if (f.match(/(jest|babel|webpack|tsconfig|eslint|prettier|rollup|vite|package)\.(js|ts|json)$/)) return false;
     // Exclude json files
