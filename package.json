@@ -10,6 +10,23 @@
   "author": "Mahmoud Mabrok",
   "license": "MIT",
   "type": "module",
+  "keywords": [
+    "coverage",
+    "test",
+    "jest",
+    "git",
+    "ci",
+    "code-coverage",
+    "pull-request",
+    "diff"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MahmoudMabrok/mo3ta-coverage.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MahmoudMabrok/mo3ta-coverage/issues"
+  },
   "devDependencies": {
     "@babel/core": "^7.28.0",
     "@babel/preset-env": "^7.28.0",
