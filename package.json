@@ -1,12 +1,15 @@
 {
   "name": "mo3ta-coverage",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "Run tests and report uncovered changed lines in a PR",
   "main": "index.js",
   "bin": {
     "mo3ta-coverage": "./index.js"
   },
-  "scripts": {},
+  "scripts": {
+    "test": "jest --coverage",
+    "build": "babel index.js -o dist/index.js"
+  },
   "author": "Mahmoud Mabrok",
   "license": "MIT",
   "type": "module",
