@@ -6,7 +6,10 @@
   "bin": {
     "mo3ta-coverage": "./index.js"
   },
-  "scripts": {},
+  "scripts": {
+    "test": "jest --coverage",
+    "build": "babel index.js -o dist/index.js"
+  },
   "author": "Mahmoud Mabrok",
   "license": "MIT",
   "type": "module",
