@@ -18,11 +18,12 @@ export function main(options) {
   const LCOV_PATH = options.lcov;
   const COVERAGE_LIMIT = parseFloat(options.limit);
   const SHOW_COVERED = options.showCovered === true || options.showCovered === 'true';
+  const RUN_TESTS_ONLY = options.runTestsOnly === true || options.runTestsOnly === 'true';
 
-  console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED}`);
+  console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nRun Tests Only: ${RUN_TESTS_ONLY}`);
 
   const changedFiles = getChangedFiles(BASE_BRANCH);
-  runRelatedTests(changedFiles);
+  runRelatedTests(changedFiles, RUN_TESTS_ONLY);
   reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED);
 
 }
@@ -41,17 +42,22 @@ function getChangedFiles(BASE_BRANCH) {
     .filter(f => f.trim().length > 0 && f.match(/\.(js|ts|jsx|tsx)$/));
 }
 
-function runRelatedTests(files) {
+function runRelatedTests(files, runTestsOnly) {
   if (files.length === 0) {
     console.log('✅ No changed source files found.');
 
     exit(0);
   }
 
+  let runRelatedFilesArgs = '';
+  if (!runTestsOnly) {
+    runRelatedFilesArgs = '--findRelatedTests';
+  }
+
   console.log('🧪 Running tests related to the changed files:\n', files.join('\n'));
 
   // filter files to only those that are JavaScript or TypeScript files
-  files = getJsOnlyFiles(files);
+  files = getJsOnlyFiles(files, runTestsOnly);
 
   if (files.length === 0) {
     console.log('✅ No relevant files found for testing.');
@@ -60,9 +66,9 @@ function runRelatedTests(files) {
   }
 
   // log files to be tested
-  console.log('Files to be tested:', files.join('\n'));
+  console.log('\nFiles to be tested:', files.join('\n'));
 
-  const command = `npx jest --findRelatedTests --passWithNoTests --coverage ${files.join(' ')}`;
+  const command = `npx jest ${runRelatedFilesArgs} --passWithNoTests --coverage ${files.join(' ')}`;
   try {
     execSync(command, { stdio: 'inherit' });
   } catch (err) {
@@ -71,11 +77,11 @@ function runRelatedTests(files) {
   }
 }
 
-function getJsOnlyFiles(files) {
+function getJsOnlyFiles(files, runTestsOnly) {
   // Only include source code files, exclude test, config, and json files
   return files.filter(f => {
     // Exclude test files
-    if (f.match(/(\.test|\.spec)\.(js|ts|jsx|tsx)$/)) return false;
+    if (f.match(/(\.test|\.spec)\.(js|ts|jsx|tsx)$/)) return false || runTestsOnly;
     // Exclude config files
     if (f.match(/(jest|babel|webpack|tsconfig|eslint|prettier|rollup|vite|package)\.(js|ts|json)$/)) return false;
     // Exclude json files
@@ -139,7 +145,7 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
     return;
   }
 
-  console.log('Files with changed lines:', changedFiles.join(', '));
+  console.log('Files with changed lines:', changedFiles.join('\n'));
 
   let totalChanged = 0;
   let totalUncovered = 0;
@@ -182,6 +188,6 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
   // Cumulative coverage check
   if (totalChanged > 0) {
     const overallCoverage = (((totalChanged - totalUncovered) / totalChanged) * 100).toFixed(2);
-    console.log(`\n🔢 Overall coverage for all changed lines: ${overallCoverage}% limit is ${COVERAGE_LIMIT}%`);
+    console.log(`\n🔢 Overall coverage for all changed lines: ${overallCoverage}% limit is ${COVERAGE_LIMIT}% with Uncovered: ${totalUncovered} (${totalChanged})`);
   }
 }
