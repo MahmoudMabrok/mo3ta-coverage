@@ -18,7 +18,7 @@ export function main(options) {
   const LCOV_PATH = options.lcov;
   const COVERAGE_LIMIT = parseFloat(options.limit);
   const SHOW_COVERED = options.showCovered === true || options.showCovered === 'true';
-  const RUN_TESTS_ONLY = options.runTestsOnly === true || options.runTestsOnly === 'true';
+  const RUN_TESTS_ONLY = options.shallowTests === true || options.shallowTests === 'true';
 
   console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nRun Tests Only: ${RUN_TESTS_ONLY}`);
 
@@ -81,7 +81,9 @@ function getJsOnlyFiles(files, runTestsOnly) {
   // Only include source code files, exclude test, config, and json files
   return files.filter(f => {
     // Exclude test files
-    if (f.match(/(\.test|\.spec)\.(js|ts|jsx|tsx)$/)) return false || runTestsOnly;
+    if (f.match(/(\.test|\.spec)\.(js|ts|jsx|tsx)$/)) return false;
+    // skip non test files when running only test files
+    if (runTestsOnly) return false;
     // Exclude config files
     if (f.match(/(jest|babel|webpack|tsconfig|eslint|prettier|rollup|vite|package)\.(js|ts|json)$/)) return false;
     // Exclude json files

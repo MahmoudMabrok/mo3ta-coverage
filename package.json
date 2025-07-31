@@ -1,6 +1,6 @@
 {
   "name": "mo3ta-coverage",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Run tests and report uncovered changed lines in a PR",
   "main": "index.js",
   "bin": {
