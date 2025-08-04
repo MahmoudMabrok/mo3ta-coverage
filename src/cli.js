@@ -18,12 +18,12 @@ export function main(options) {
   const LCOV_PATH = options.lcov;
   const COVERAGE_LIMIT = parseFloat(options.limit);
   const SHOW_COVERED = options.showCovered === true || options.showCovered === 'true';
-  const RUN_TESTS_ONLY = options.shallowTests === true || options.shallowTests === 'true';
+  const SHALLOW_TESTS = options.shallowTests === true || options.shallowTests === 'true';
 
-  console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nRun Tests Only: ${RUN_TESTS_ONLY}`);
+  console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nShallow Tests: ${SHALLOW_TESTS}`);
 
   const changedFiles = getChangedFiles(BASE_BRANCH);
-  runRelatedTests(changedFiles, RUN_TESTS_ONLY);
+  runRelatedTests(changedFiles, SHALLOW_TESTS);
   reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED);
 
 }
