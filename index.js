@@ -34,7 +34,6 @@ program
   .option('--limit <percent>', 'Minimum required coverage percentage for all changed lines (e.g., 80)', '80')
   .option('--showCovered <bool>', 'Show covered changed lines in the output', false)
   .option('--shallowTests <bool>', 'Run test files only without deep in tests tree', true)
-  .passThroughOptions()
   .enablePositionalOptions(); 
 
 
