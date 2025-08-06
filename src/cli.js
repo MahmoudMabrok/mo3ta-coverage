@@ -2,44 +2,52 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { exit } from 'process';
+import { verifyBaseBranchExists, verifyGitRepoExists } from './gitUtils.js';
+import { getJsOnlyFiles } from './fileUtils.js';
 
 export function main(options) {
-   // Check if current directory is a git repository
   try {
-    execSync('git rev-parse --is-inside-work-tree', { stdio: 'ignore' });
-  } catch (err) {
-    console.error(`❌ Not a git repository. Please run this tool inside a git repo. ${err.message}`);
+    // Check if current directory is a git repository
+    verifyGitRepoExists();
 
+    const BASE_BRANCH = options.base;
+    const LCOV_PATH = options.lcov;
+    const COVERAGE_LIMIT = parseFloat(options.limit);
+    const SHOW_COVERED = options.showCovered === true || options.showCovered === 'true';
+    const SHALLOW_TESTS = options.shallowTests === true || options.shallowTests === 'true';
+
+    console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nShallow Tests: ${SHALLOW_TESTS}`);
+
+    const changedFiles = getChangedFiles(BASE_BRANCH);
+    runRelatedTests(changedFiles, SHALLOW_TESTS);
+    reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED);
+  } catch (error) {
+    console.error('❌ An unexpected error occurred:', error.message || error);
     exit(1);
   }
-
-
-  const BASE_BRANCH = options.base;
-  const LCOV_PATH = options.lcov;
-  const COVERAGE_LIMIT = parseFloat(options.limit);
-  const SHOW_COVERED = options.showCovered === true || options.showCovered === 'true';
-  const SHALLOW_TESTS = options.shallowTests === true || options.shallowTests === 'true';
-
-  console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nShallow Tests: ${SHALLOW_TESTS}`);
-
-  const changedFiles = getChangedFiles(BASE_BRANCH);
-  runRelatedTests(changedFiles, SHALLOW_TESTS);
-  reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED);
-
 }
 
+
 function getChangedFiles(BASE_BRANCH) {
+  // Check if BASE_BRANCH exists
+  verifyBaseBranchExists(BASE_BRANCH);
+
   const command = `(
     git log --pretty=format: --name-only --diff-filter=AM --author="$(git config user.name)" $(git merge-base HEAD ${BASE_BRANCH})..HEAD
     git diff --name-only --diff-filter=AM
     git diff --cached --name-only --diff-filter=AM
   ) | sort -u`;
   
-  const output = execSync(command).toString();
-
-  return output
-    .split('\n')
-    .filter(f => f.trim().length > 0 && f.match(/\.(js|ts|jsx|tsx)$/));
+  try {
+    const output = execSync(command).toString();
+    console.log(`Changed files:\n${output}`);
+    return output
+      .split('\n')
+      .filter(f => f.trim().length > 0 && f.match(/\.(js|ts|jsx|tsx)$/));
+  } catch (error) {
+    console.error('Error getting changed files:', error.message || error);
+    return [];
+  }
 }
 
 function runRelatedTests(files, runTestsOnly) {
@@ -66,7 +74,7 @@ function runRelatedTests(files, runTestsOnly) {
   }
 
   // log files to be tested
-  console.log('\nFiles to be tested:', files.join('\n'));
+  console.log('\nFiles to be tested:\n', files.join('\n'));
 
   const command = `npx jest ${runRelatedFilesArgs} --passWithNoTests --coverage ${files.join(' ')}`;
   try {
@@ -75,22 +83,6 @@ function runRelatedTests(files, runTestsOnly) {
     console.error('Error:', err.message || err);
     exit(1);
   }
-}
-
-function getJsOnlyFiles(files, runTestsOnly) {
-  // Only include source code files, exclude test, config, and json files
-  return files.filter(f => {
-    // Exclude test files
-    if (f.match(/(\.test|\.spec)\.(js|ts|jsx|tsx)$/)) return false;
-    // skip non test files when running only test files
-    if (runTestsOnly) return false;
-    // Exclude config files
-    if (f.match(/(jest|babel|webpack|tsconfig|eslint|prettier|rollup|vite|package)\.(js|ts|json)$/)) return false;
-    // Exclude json files
-    if (f.endsWith('.json')) return false;
-    // Only include code files
-    return f.endsWith('.js') || f.endsWith('.ts') || f.endsWith('.jsx') || f.endsWith('.tsx');
-  });
 }
 
 function getChangedLines(filePath, BASE_BRANCH) {
@@ -190,6 +182,6 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
   // Cumulative coverage check
   if (totalChanged > 0) {
     const overallCoverage = (((totalChanged - totalUncovered) / totalChanged) * 100).toFixed(2);
-    console.log(`\n🔢 Overall coverage for all changed lines: ${overallCoverage}% limit is ${COVERAGE_LIMIT}% with Uncovered: ${totalUncovered} (${totalChanged})`);
+    console.log(`\n🔢 Overall coverage for all changed lines: ${overallCoverage}% >>> ${COVERAGE_LIMIT}% with Uncovered(Line of code count): ${totalUncovered} (${totalChanged})`);
   }
 }
