@@ -14,7 +14,7 @@ export function main(options) {
     const LCOV_PATH = options.lcov;
     const COVERAGE_LIMIT = parseFloat(options.limit);
     const SHOW_COVERED = options.showCovered === true || options.showCovered === 'true';
-    const SHALLOW_TESTS = options.shallowTests === true || options.shallowTests === 'true';
+    const SHALLOW_TESTS = options.shallow === true || options.shallow === 'true';
 
     console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nShallow Tests: ${SHALLOW_TESTS}`);
 
@@ -182,6 +182,8 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
   // Cumulative coverage check
   if (totalChanged > 0) {
     const overallCoverage = (((totalChanged - totalUncovered) / totalChanged) * 100).toFixed(2);
-    console.log(`\n🔢 Overall coverage for all changed lines: ${overallCoverage}% >>> ${COVERAGE_LIMIT}% with Uncovered(Line of code count): ${totalUncovered} (${totalChanged})`);
+    console.log(`\n🔢 Overall coverage for all changed lines: ${overallCoverage}% >>> ${COVERAGE_LIMIT}% `);
+    console.log(`Uncovered Lines: ${totalUncovered} out of ${totalChanged} changed lines`);
+    
   }
 }
