@@ -14,7 +14,7 @@
 ## Usage
 
 ```sh
-mo3ta-coverage --base origin/master --lcov coverage/lcov.info --limit 80 --showCovered --shallowTests=false
+mo3ta-coverage --base origin/master --lcov coverage/lcov.info --limit 80 --showCovered --shallow=false
 ```
 
 ## CLI Options
