@@ -1,4 +1,4 @@
-# mo3ta-coverage
+# mo3ta-coverage ![NPM Version](https://img.shields.io/npm/v/mo3ta-coverage)
 
 **mo3ta-coverage** is a [CLI tool](https://www.npmjs.com/package/mo3ta-coverage) for checking test coverage of changed lines in a pull request. It runs related tests, parses coverage reports, and ensures cumulative coverage meets a specified threshold—ideal for CI and code review workflows.
 
