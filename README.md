@@ -14,7 +14,7 @@
 ## Usage
 
 ```sh
-mo3ta-coverage --base origin/master --lcov coverage/lcov.info --limit 80 --showCovered --shallow=false
+mo3ta-coverage
 ```
 
 ## CLI Options
@@ -47,10 +47,10 @@ Run tests and report uncovered changed lines in a PR. Checks cumulative coverage
 npm install -g mo3ta-coverage
 ```
 
-## Usage
+## Full Usage
 
 ```sh
-mo3ta-coverage --base origin/main --lcov coverage/lcov.info --limit 80 --showCovered --shallow
+--base origin/master --lcov coverage/lcov.info --limit 80 --showCovered --shallow=false
 ```
 
 ### Options
