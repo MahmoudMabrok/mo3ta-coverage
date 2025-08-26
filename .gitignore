@@ -3,3 +3,4 @@ coverage/
 .env
 .DS_Store
 *.log
+.mo3ta-coverage.json
