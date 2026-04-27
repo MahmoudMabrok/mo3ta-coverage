@@ -1,4 +1,5 @@
-import { getJsOnlyFiles } from './fileUtils';
+import { getJsOnlyFiles, separateSourceAndTestFiles, findTestFilesForSource } from './fileUtils';
+import fs from 'fs';
 
 describe('getJsOnlyFiles', () => {
     const files = [
@@ -80,5 +81,154 @@ describe('getJsOnlyFiles', () => {
             'src/component.jsx',
             'src/page.tsx'
         ]);
+    });
+});
+
+describe('separateSourceAndTestFiles', () => {
+    it('should separate source and test files correctly', () => {
+        const files = [
+            'src/app.js',
+            'src/utils.ts',
+            'src/app.test.js',
+            'src/utils.spec.ts',
+            'src/component.jsx',
+            'src/component.test.jsx'
+        ];
+        
+        const result = separateSourceAndTestFiles(files);
+        
+        expect(result.sourceFiles).toEqual([
+            'src/app.js',
+            'src/utils.ts',
+            'src/component.jsx'
+        ]);
+        expect(result.testFiles).toEqual([
+            'src/app.test.js',
+            'src/utils.spec.ts',
+            'src/component.test.jsx'
+        ]);
+    });
+
+    it('should exclude config and json files', () => {
+        const files = [
+            'src/app.js',
+            'jest.config.js',
+            'package.json',
+            'src/data.json'
+        ];
+        
+        const result = separateSourceAndTestFiles(files);
+        
+        expect(result.sourceFiles).toEqual(['src/app.js']);
+        expect(result.testFiles).toEqual([]);
+    });
+
+    it('should handle empty array', () => {
+        const result = separateSourceAndTestFiles([]);
+        
+        expect(result.sourceFiles).toEqual([]);
+        expect(result.testFiles).toEqual([]);
+    });
+
+    it('should handle all test files', () => {
+        const files = [
+            'src/app.test.js',
+            'src/utils.spec.ts'
+        ];
+        
+        const result = separateSourceAndTestFiles(files);
+        
+        expect(result.sourceFiles).toEqual([]);
+        expect(result.testFiles).toEqual([
+            'src/app.test.js',
+            'src/utils.spec.ts'
+        ]);
+    });
+});
+
+describe('findTestFilesForSource', () => {
+    // Mock fs.existsSync for testing
+    const originalExistsSync = fs.existsSync;
+    
+    beforeEach(() => {
+        // Reset mock before each test
+        fs.existsSync = jest.fn();
+    });
+
+    afterEach(() => {
+        // Restore original function
+        fs.existsSync = originalExistsSync;
+    });
+
+    it('should find test file in same directory with .test.js pattern', () => {
+        fs.existsSync.mockImplementation((path) => {
+            return path === 'src/utils/helper.test.js';
+        });
+
+        const result = findTestFilesForSource('src/utils/helper.js');
+        
+        expect(result).toContain('src/utils/helper.test.js');
+    });
+
+    it('should find test file in __tests__ subdirectory', () => {
+        fs.existsSync.mockImplementation((path) => {
+            return path === 'src/utils/__tests__/helper.test.js';
+        });
+
+        const result = findTestFilesForSource('src/utils/helper.js');
+        
+        expect(result).toContain('src/utils/__tests__/helper.test.js');
+    });
+
+    it('should find multiple test files if they exist', () => {
+        fs.existsSync.mockImplementation((path) => {
+            return path === 'src/utils/helper.test.js' || 
+                   path === 'src/utils/helper.spec.js';
+        });
+
+        const result = findTestFilesForSource('src/utils/helper.js');
+        
+        expect(result).toContain('src/utils/helper.test.js');
+        expect(result).toContain('src/utils/helper.spec.js');
+        expect(result.length).toBe(2);
+    });
+
+    it('should return empty array if no test files exist', () => {
+        fs.existsSync.mockReturnValue(false);
+
+        const result = findTestFilesForSource('src/utils/helper.js');
+        
+        expect(result).toEqual([]);
+    });
+
+    it('should find test files in parallel tests directory structure', () => {
+        fs.existsSync.mockImplementation((path) => {
+            // path.join normalizes paths, removing leading './'
+            return path === 'src/tests/utils/helper.test.js';
+        });
+
+        const result = findTestFilesForSource('./src/utils/helper.js');
+        
+        expect(result).toContain('src/tests/utils/helper.test.js');
+    });
+
+    it('should handle TypeScript files', () => {
+        fs.existsSync.mockImplementation((path) => {
+            return path === 'src/utils/helper.test.ts';
+        });
+
+        const result = findTestFilesForSource('src/utils/helper.ts');
+        
+        expect(result).toContain('src/utils/helper.test.ts');
+    });
+
+    it('should handle JSX files', () => {
+        fs.existsSync.mockImplementation((path) => {
+            return path === 'src/components/Button.test.jsx';
+        });
+
+        const result = findTestFilesForSource('src/components/Button.jsx');
+        
+        expect(result).toContain('src/components/Button.test.jsx');
     });
 });

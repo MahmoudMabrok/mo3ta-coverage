@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { exit } from 'process';
 import { verifyBaseBranchExists, verifyGitRepoExists } from './gitUtils.js';
-import { getJsOnlyFiles } from './fileUtils.js';
+import { getJsOnlyFiles, separateSourceAndTestFiles, findTestFilesForSource } from './fileUtils.js';
 
 export function main(options) {
   try {
@@ -14,12 +14,12 @@ export function main(options) {
     const LCOV_PATH = options.lcov;
     const COVERAGE_LIMIT = parseFloat(options.limit);
     const SHOW_COVERED = options.showCovered === true || options.showCovered === 'true';
-    const SHALLOW_TESTS = options.shallow === true || options.shallow === 'true';
+    const MODE = options.mode;
 
-    console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nShallow Tests: ${SHALLOW_TESTS}`);
+    console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE}`);
 
     const changedFiles = getChangedFiles(BASE_BRANCH);
-    runRelatedTests(changedFiles, SHALLOW_TESTS);
+    runRelatedTests(changedFiles, MODE);
     reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED);
   } catch (error) {
     console.error('❌ An unexpected error occurred:', error.message || error);
@@ -50,38 +50,107 @@ function getChangedFiles(BASE_BRANCH) {
   }
 }
 
-function runRelatedTests(files, runTestsOnly) {
+function runRelatedTests(files, mode) {
   if (files.length === 0) {
     console.log('✅ No changed source files found.');
-
     exit(0);
   }
 
-  let runRelatedFilesArgs = '';
-  if (!runTestsOnly) {
-    runRelatedFilesArgs = '--findRelatedTests';
+  console.log('🔍 Analyzing changed files for optimal test execution...');
+
+  // Separate source files and test files
+  const { sourceFiles, testFiles } = separateSourceAndTestFiles(files);
+
+  console.log(`\n📊 Changed files breakdown:`);
+  console.log(`   Source files: ${sourceFiles.length}`);
+  console.log(`   Test files: ${testFiles.length}`);
+  if (sourceFiles.length > 0) {
+    console.log('   Source file list:');
+    sourceFiles.forEach(file => console.log(`     - ${file}`));
+  }
+  if (testFiles.length > 0) {
+    console.log('   Changed test file list:');
+    testFiles.forEach(file => console.log(`     - ${file}`));
   }
 
-  console.log('🧪 Running tests related to the changed files:\n', files.join('\n'));
+  // Find test files for changed source files
+  const testFilesToRun = new Set(testFiles);
+  const mappedTests = new Map(); // Track which tests map to which source files
 
-  // filter files to only those that are JavaScript or TypeScript files
-  files = getJsOnlyFiles(files, runTestsOnly);
+  sourceFiles.forEach(sourceFile => {
+    const relatedTests = findTestFilesForSource(sourceFile);
+    if (relatedTests.length > 0) {
+      console.log(`   ✓ ${sourceFile} → ${relatedTests.length} test file(s)`);
+      relatedTests.forEach(test => {
+        testFilesToRun.add(test);
+        if (!mappedTests.has(test)) {
+          mappedTests.set(test, []);
+        }
+        mappedTests.get(test).push(sourceFile);
+      });
+    } else {
+      console.log(`   ⚠ ${sourceFile} → No test file found`);
+    }
+  });
 
-  if (files.length === 0) {
-    console.log('✅ No relevant files found for testing.');
+  const finalTestFiles = Array.from(testFilesToRun);
+
+  if (finalTestFiles.length === 0) {
+    console.log('\n⚠️  No test files found to run.');
+    console.log('Consider creating test files for your changed source files.');
+    exit(0);
+  }
+
+  console.log(`\n🧪 Running ${finalTestFiles.length} test file(s):\n`, finalTestFiles.join('\n'));
+
+  if (mode === 'fast') {
+    console.log(`\n📝 Test strategy: fast (Direct execution, no Jest dependency traversal)`);
+    console.log(`   Test files: ${finalTestFiles.length}`);
+    console.log(`   Source files detected: ${sourceFiles.length}`);
+    console.log('   Files passed to Jest:');
+    finalTestFiles.forEach(file => console.log(`     - ${file}`));
+    const command = `npx jest --passWithNoTests --coverage ${finalTestFiles.join(' ')}`;
+    console.log(`   Jest command: ${command}`);
+
+    try {
+      execSync(command, { stdio: 'inherit' });
+    } catch (err) {
+      console.error('❌ Tests failed:', err.message || err);
+      exit(1);
+    }
+  } else if (mode === 'smart') {
+    console.log(`\n📝 Test strategy: smart (Combine source and mapped test files, no Jest dependency traversal)`);
+    console.log(`   Test files: ${finalTestFiles.length}`);
+    console.log(`   Source files for coverage: ${sourceFiles.length}`);
+    const allFiles = [...sourceFiles, ...finalTestFiles];
+    console.log(`   Total files passed to Jest: ${allFiles.length}`);
+    console.log('   Files passed to Jest:');
+    allFiles.forEach(file => console.log(`     - ${file}`));
+    const command = `npx jest --passWithNoTests --coverage ${allFiles.join(' ')}`;
+    console.log(`   Jest command: ${command}`);
+
+    try {
+      execSync(command, { stdio: 'inherit' });
+    } catch (err) {
+      console.error('❌ Tests failed:', err.message || err);
+      exit(1);
+    }
+  } else {
+    console.log(`\n📝 Test strategy: full (Run mapped tests through Jest --findRelatedTests)`);
+    console.log(`   Running tests for ${sourceFiles.length} source file(s) + ${testFiles.length} changed test(s)`);
+    console.log(`   Test files in Jest command: ${finalTestFiles.length}`);
+    console.log(`   ⚠️  If this expands to too many tests, switch to --mode smart`);
+    console.log('   Test files passed to Jest:');
+    finalTestFiles.forEach(file => console.log(`     - ${file}`));
+    const command = `npx jest --findRelatedTests --passWithNoTests --coverage ${finalTestFiles.join(' ')}`;
+    console.log(`   Jest command: ${command}`);
     
-    exit(0);
-  }
-
-  // log files to be tested
-  console.log('\nFiles to be tested:\n', files.join('\n'));
-
-  const command = `npx jest ${runRelatedFilesArgs} --passWithNoTests --coverage ${files.join(' ')}`;
-  try {
-    execSync(command, { stdio: 'inherit' });
-  } catch (err) {
-    console.error('Error:', err.message || err);
-    exit(1);
+    try {
+      execSync(command, { stdio: 'inherit' });
+    } catch (err) {
+      console.error('❌ Tests failed:', err.message || err);
+      exit(1);
+    }
   }
 }
 
@@ -102,7 +171,7 @@ function getChangedLines(filePath, BASE_BRANCH) {
   return lines;
 }
 
-function parseLcov(LCOV_PATH) {
+export function parseLcov(LCOV_PATH) {
   const lcovRaw = fs.readFileSync(LCOV_PATH, 'utf8');
   const files = {};
   let currentFile = null;
@@ -110,16 +179,51 @@ function parseLcov(LCOV_PATH) {
   lcovRaw.split('\n').forEach(line => {
     if (line.startsWith('SF:')) {
       currentFile = path.resolve(line.substring(3).trim());
-      files[currentFile] = new Set();
+      files[currentFile] = {
+        coverableLines: new Set(),
+        uncoveredLines: new Set()
+      };
     } else if (line.startsWith('DA:') && currentFile) {
       const [lineNo, hits] = line.substring(3).split(',').map(Number);
+      files[currentFile].coverableLines.add(lineNo);
       if (hits === 0) {
-        files[currentFile].add(lineNo);
+        files[currentFile].uncoveredLines.add(lineNo);
       }
     }
   });
 
   return files;
+}
+
+export function classifyChangedLineCoverage(changedLines, fileCoverage) {
+  const coverage = fileCoverage || {
+    coverableLines: new Set(),
+    uncoveredLines: new Set()
+  };
+
+  const coveredLines = [];
+  const uncoveredLines = [];
+  const missingLines = [];
+
+  changedLines.forEach(line => {
+    if (!coverage.coverableLines.has(line)) {
+      missingLines.push(line);
+      return;
+    }
+
+    if (coverage.uncoveredLines.has(line)) {
+      uncoveredLines.push(line);
+      return;
+    }
+
+    coveredLines.push(line);
+  });
+
+  return {
+    coveredLines,
+    uncoveredLines,
+    missingLines
+  };
 }
 
 function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED) {
@@ -128,7 +232,7 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
     process.exit(1);
   }
 
-  const uncoveredLines = parseLcov(LCOV_PATH);
+  const coverageByFile = parseLcov(LCOV_PATH);
 
   console.log(`\n🔍 Checking coverage of changed lines vs branch: ${BASE_BRANCH}\n`);
 
@@ -142,48 +246,55 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
   console.log('Files with changed lines:', changedFiles.join('\n'));
 
   let totalChanged = 0;
-  let totalUncovered = 0;
+  let totalNotCovered = 0;
 
   changedFiles.forEach(relPath => {
     const absPath = path.resolve(relPath);
-    if (!uncoveredLines[absPath]) {
-      console.log(`⚠️  No coverage info for: ${absPath}`);
-      return;
-    }
-
     const addedLines = getChangedLines(relPath, BASE_BRANCH);
-    const fileUncovered = uncoveredLines[absPath];
-
-    const uncoveredInDiff = addedLines.filter(line => fileUncovered.has(line));
-    const coveredInDiff = addedLines.length - uncoveredInDiff.length;
-
-    totalChanged += addedLines.length;
-    totalUncovered += uncoveredInDiff.length;
 
     if (addedLines.length === 0) {
       console.log(`ℹ️  ${absPath} - No changed lines detected.`);
       return;
     }
 
-    if (uncoveredInDiff.length > 0) {
-      console.log(`🚨 ${absPath} - Uncovered changed lines: [${uncoveredInDiff.join(', ')}]`);
+    const fileCoverage = coverageByFile[absPath];
+    if (!fileCoverage) {
+      console.log(`⚠️  No coverage info for: ${absPath}`);
+    }
+
+    const {
+      coveredLines,
+      uncoveredLines,
+      missingLines
+    } = classifyChangedLineCoverage(addedLines, fileCoverage);
+    const notCoveredCount = uncoveredLines.length + missingLines.length;
+
+    totalChanged += addedLines.length;
+    totalNotCovered += notCoveredCount;
+
+    if (notCoveredCount > 0) {
+      if (uncoveredLines.length > 0) {
+        console.log(`🚨 ${absPath} - Uncovered changed lines: [${uncoveredLines.join(', ')}]`);
+      }
+      if (missingLines.length > 0) {
+        console.log(`⚠️  ${absPath} - Changed lines missing from LCOV: [${missingLines.join(', ')}]`);
+      }
     } else {
       console.log(`✅ ${absPath} - All changed lines are covered`);
     }
-    // Display covered lines if option is enabled
-    const coveredLines = addedLines.filter(line => !fileUncovered.has(line));
-    console.log(`   Total changed lines: ${addedLines.length}, Covered: ${coveredInDiff}, Uncovered: ${uncoveredInDiff.length}`);
+
+    console.log(`   Total changed lines: ${addedLines.length}, Covered: ${coveredLines.length}, Uncovered: ${uncoveredLines.length}, Missing from LCOV: ${missingLines.length}`);
     if (SHOW_COVERED) {
       console.log(`   Covered lines: [${coveredLines.join(', ')}]`);
     }
-    console.log(`   Coverage for changed lines: ${((coveredInDiff / addedLines.length) * 100).toFixed(2)}%`);
+    console.log(`   Coverage for changed lines: ${((coveredLines.length / addedLines.length) * 100).toFixed(2)}%`);
   });
 
   // Cumulative coverage check
   if (totalChanged > 0) {
-    const overallCoverage = (((totalChanged - totalUncovered) / totalChanged) * 100).toFixed(2);
+    const overallCoverage = (((totalChanged - totalNotCovered) / totalChanged) * 100).toFixed(2);
     console.log(`\n🔢 Overall coverage for all changed lines: ${overallCoverage}% >>> ${COVERAGE_LIMIT}% `);
-    console.log(`Uncovered Lines: ${totalUncovered} out of ${totalChanged} changed lines`);
+    console.log(`Not covered lines: ${totalNotCovered} out of ${totalChanged} changed lines`);
     
   }
 }
