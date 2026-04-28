@@ -1,5 +1,7 @@
-import { getJsOnlyFiles, separateSourceAndTestFiles, findTestFilesForSource } from './fileUtils';
+import { getJsOnlyFiles, separateSourceAndTestFiles, findReverseDeps, findTestFilesForSource } from './fileUtils';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 describe('getJsOnlyFiles', () => {
     const files = [
@@ -230,5 +232,34 @@ describe('findTestFilesForSource', () => {
         const result = findTestFilesForSource('src/components/Button.jsx');
         
         expect(result).toContain('src/components/Button.test.jsx');
+    });
+});
+
+describe('findReverseDeps', () => {
+    const originalCwd = process.cwd();
+
+    beforeEach(() => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mo3ta-reverse-deps-'));
+        process.chdir(tempDir);
+        fs.mkdirSync('src', { recursive: true });
+    });
+
+    afterEach(() => {
+        process.chdir(originalCwd);
+    });
+
+    it('limits traversal to the configured depth', () => {
+        fs.writeFileSync('src/leaf.js', 'export const leaf = 1;\n');
+        fs.writeFileSync('src/mid.js', "import './leaf.js';\nexport const mid = 1;\n");
+        fs.writeFileSync('src/top.js', "import './mid.js';\nexport const top = 1;\n");
+
+        const depthOne = findReverseDeps(['src/leaf.js'], 1);
+        const depthTwo = findReverseDeps(['src/leaf.js'], 2);
+
+        expect(depthOne).toEqual([path.resolve('src/mid.js')]);
+        expect(depthTwo).toEqual([
+            path.resolve('src/mid.js'),
+            path.resolve('src/top.js')
+        ]);
     });
 });

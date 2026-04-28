@@ -35,6 +35,7 @@ program
   .option('--limit <percent>', 'Minimum required coverage percentage for all changed lines (e.g., 80)', '80')
   .option('--showCovered <bool>', 'Show covered changed lines in the output', false)
   .option('--mode <mode>', 'Execution mode: fast, smart, or full', 'smart')
+  .option('--maxDepth <number>', 'Maximum reverse dependency depth for smart mode', '3')
   .enablePositionalOptions(); // used to allow using same options in subcommands
 
 
@@ -43,6 +44,7 @@ program
   .description('Set or get configuration options')
   .option('--base <branch>', 'Set default base branch')
   .option('--mode <mode>', 'Set default mode (fast/smart/full)')
+  .option('--maxDepth <number>', 'Set default reverse dependency depth for smart mode')
   .action((opts) => {
     let config = readConfig();
 
@@ -66,6 +68,18 @@ program
       updated = true;
       console.log(`Default mode set to: ${config.mode}`);
     }
+
+    if (opts.maxDepth !== undefined) {
+      const parsedMaxDepth = parseInt(opts.maxDepth, 10);
+      if (!Number.isInteger(parsedMaxDepth) || parsedMaxDepth < 0) {
+        console.error(`Invalid maxDepth: ${opts.maxDepth}. Expected a non-negative integer.`);
+        process.exit(1);
+      }
+      config.maxDepth = parsedMaxDepth;
+      updated = true;
+      console.log(`Default max depth set to: ${config.maxDepth}`);
+    }
+
     if (updated) {
       writeConfig(config);
     } else {
@@ -91,9 +105,19 @@ program.action((opts) => {
     options.mode = config.mode;
   }
 
+  if ((options.maxDepth === undefined || options.maxDepth === '3') && config.maxDepth !== undefined) {
+    options.maxDepth = config.maxDepth;
+  }
+
   options.mode = String(options.mode || 'smart').toLowerCase();
   if (!['fast', 'smart', 'full'].includes(options.mode)) {
     console.error(`Invalid mode: ${options.mode}. Expected one of: fast, smart, full.`);
+    process.exit(1);
+  }
+
+  options.maxDepth = parseInt(options.maxDepth ?? 3, 10);
+  if (!Number.isInteger(options.maxDepth) || options.maxDepth < 0) {
+    console.error(`Invalid maxDepth: ${options.maxDepth}. Expected a non-negative integer.`);
     process.exit(1);
   }
 

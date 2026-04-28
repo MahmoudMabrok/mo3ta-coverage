@@ -4,6 +4,41 @@ import path from 'path';
 import { exit } from 'process';
 import { verifyBaseBranchExists, verifyGitRepoExists } from './gitUtils.js';
 import { getJsOnlyFiles, separateSourceAndTestFiles, findTestFilesForSource } from './fileUtils.js';
+import { findImportersForMany } from './importer.js';
+
+function findReverseDepsForSourceFiles(sourceFiles, maxDepth) {
+  if (sourceFiles.length === 0) return [];
+  const importerResults = findImportersForMany(sourceFiles, maxDepth, {
+    projectDir: process.cwd()
+  });
+  const testFilesForReverseDeps = new Set();
+  const debugResults = [];
+
+  importerResults.forEach((result, targetFile) => {
+    const importers = result.importers.map(node => node.file);
+
+    debugResults.push({
+      targetFile,
+      importerCount: importers.length,
+      maxDepthReached: result.maxDepthReached,
+      importers: result.importers.map(node => ({
+        file: node.file,
+        depth: node.depth,
+        importedBy: node.importedBy
+      }))
+    });
+
+    importers.forEach(file => {
+      const tests = findTestFilesForSource(file);
+      tests.forEach(test => testFilesForReverseDeps.add(test));
+    });
+  });
+
+  return {
+    reverseDepsTests: Array.from(testFilesForReverseDeps),
+    debugResults
+  };
+}
 
 export function main(options) {
   try {
@@ -15,11 +50,12 @@ export function main(options) {
     const COVERAGE_LIMIT = parseFloat(options.limit);
     const SHOW_COVERED = options.showCovered === true || options.showCovered === 'true';
     const MODE = options.mode;
+    const MAX_DEPTH = options.maxDepth;
 
-    console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE}`);
+    console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE} \nMax Depth: ${MAX_DEPTH}`);
 
     const changedFiles = getChangedFiles(BASE_BRANCH);
-    runRelatedTests(changedFiles, MODE);
+    runRelatedTests(changedFiles, MODE, MAX_DEPTH);
     reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED);
   } catch (error) {
     console.error('❌ An unexpected error occurred:', error.message || error);
@@ -50,7 +86,7 @@ function getChangedFiles(BASE_BRANCH) {
   }
 }
 
-function runRelatedTests(files, mode) {
+function runRelatedTests(files, mode, maxDepth) {
   if (files.length === 0) {
     console.log('✅ No changed source files found.');
     exit(0);
@@ -119,11 +155,25 @@ function runRelatedTests(files, mode) {
       exit(1);
     }
   } else if (mode === 'smart') {
-    console.log(`\n📝 Test strategy: smart (Combine source and mapped test files, no Jest dependency traversal)`);
+    console.log(`\n📝 Test strategy: smart (Combine source and mapped test files, plus reverse deps up to depth ${maxDepth})`);
     console.log(`   Test files: ${finalTestFiles.length}`);
     console.log(`   Source files for coverage: ${sourceFiles.length}`);
-    const allFiles = [...sourceFiles, ...finalTestFiles];
+    const { reverseDepsTests, debugResults } = findReverseDepsForSourceFiles(sourceFiles, maxDepth);
+    const uniqueAllFiles = new Set([...sourceFiles, ...finalTestFiles, ...reverseDepsTests]);
+    const allFiles = Array.from(uniqueAllFiles);
     console.log(`   Total files passed to Jest: ${allFiles.length}`);
+    if (reverseDepsTests.length > 0) {
+      console.log(`   Test files for files that import changes (reverse deps): ${reverseDepsTests.length}`);
+    }
+    if (debugResults.length > 0) {
+      console.log('   Reverse dependency debug:');
+      debugResults.forEach(({ targetFile, importerCount, maxDepthReached, importers }) => {
+        console.log(`     - ${targetFile}: importers=${importerCount}, maxDepthReached=${maxDepthReached}`);
+        importers.forEach(({ file, depth, importedBy }) => {
+          console.log(`       depth=${depth} file=${file}${importedBy ? ` importedBy=${importedBy}` : ''}`);
+        });
+      });
+    }
     console.log('   Files passed to Jest:');
     allFiles.forEach(file => console.log(`     - ${file}`));
     const command = `npx jest --passWithNoTests --coverage ${allFiles.join(' ')}`;
