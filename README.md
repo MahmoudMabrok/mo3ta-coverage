@@ -73,13 +73,6 @@ npm install
 npm test
 ```
 
-## Additional Reading
-
-- [OPTIMIZATION_GUIDE.md](OPTIMIZATION_GUIDE.md)
-- [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
-- [RECOMMENDED_USAGE.md](RECOMMENDED_USAGE.md)
-- [JEST_PR_HISTORY.md](JEST_PR_HISTORY.md)
-
 ## License
 
 MIT
