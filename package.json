@@ -37,6 +37,6 @@
     "jest": "^30.0.5"
   },
   "dependencies": {
-    "commander": "^14.0.0"
+    "commander": "^14.0.1"
   }
 }
