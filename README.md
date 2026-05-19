@@ -4,11 +4,13 @@ mo3ta-coverage checks coverage for changed lines in a pull request. It finds cha
 
 ## Features
 
-- Detects changed JS/TS files from git history and working tree
+- Detects changed JS/TS files from all commits in the current branch, uncommitted changes, and staged files
 - Maps changed source files to nearby test files automatically
 - Supports three execution modes: `fast`, `smart`, and `full`
+- Smart mode includes reverse dependency analysis with configurable depth
 - Parses `lcov.info` and reports uncovered changed lines
 - Enforces a minimum coverage threshold for changed lines
+- Helpful error messages when invalid options are provided
 
 ## Installation
 
@@ -26,17 +28,21 @@ mo3ta-coverage --mode smart --base origin/main --limit 80
 
 | Option | Description | Default |
 |--------|-------------|---------|
+| `-v, --version` | Output the current version | - |
 | `--base <branch>` | Base branch to compare against | `origin/main` |
 | `--lcov <path>` | Path to `lcov.info` | `coverage/lcov.info` |
 | `--limit <percent>` | Minimum changed-line coverage percentage | `80` |
 | `--showCovered <bool>` | Show covered changed lines in output | `false` |
-| `--mode <mode>` | Execution mode: `fast`, `smart`, or `full` | `smart` |
+| `--mode <mode>` | Execution mode: `fast`, `smart`, or `full` (required) | `smart` |
+| `--maxDepth <number>` | Maximum reverse dependency depth for smart mode | `3` |
 
 ## Modes
 
-- `fast`: Direct execution of mapped test files only. No Jest dependency traversal.
-- `smart`: Direct execution of changed source files plus mapped test files. No Jest dependency traversal.
-- `full`: Runs mapped test files through `jest --findRelatedTests`.
+- **`fast`**: Direct execution of mapped test files only. No Jest dependency traversal. Fastest option.
+- **`smart`**: Direct execution of changed source files plus mapped test files, with reverse dependency analysis. Includes tests for files that import your changes up to `--maxDepth` levels. Recommended for most projects.
+- **`full`**: Runs mapped test files through `jest --findRelatedTests`. Let Jest expand to related tests. Use with caution in large projects.
+
+If an invalid mode is provided, the tool will display available options with descriptions.
 
 ## Recommended Mode
 
@@ -53,10 +59,19 @@ Use `full` only when you intentionally want Jest to expand to related tests.
 You can persist defaults with the `config` subcommand:
 
 ```sh
-mo3ta-coverage config --base origin/main --mode smart
+mo3ta-coverage config --base origin/main --mode smart --maxDepth 3
 ```
 
 This writes `.mo3ta-coverage.json` in the project root.
+
+## Changed Files Detection
+
+The tool detects changed files by comparing against the specified base branch:
+- All committed files in the current branch (from merge-base to HEAD)
+- Uncommitted changes in the working tree
+- Staged changes (files added with `git add`)
+
+This means coverage is checked for all changes in your branch, not just your authored commits.
 
 ## How It Works
 
