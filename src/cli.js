@@ -69,7 +69,7 @@ function getChangedFiles(BASE_BRANCH) {
   verifyBaseBranchExists(BASE_BRANCH);
 
   const command = `(
-    git log --pretty=format: --name-only --diff-filter=AM --author="$(git config user.name)" $(git merge-base HEAD ${BASE_BRANCH})..HEAD
+    git log --pretty=format: --name-only --diff-filter=AM $(git merge-base HEAD ${BASE_BRANCH})..HEAD
     git diff --name-only --diff-filter=AM
     git diff --cached --name-only --diff-filter=AM
   ) | sort -u`;

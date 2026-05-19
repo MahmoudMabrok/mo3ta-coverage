@@ -27,7 +27,8 @@ const program = new Command();
 
 program
   .name('mo3ta-coverage')
-  .description('Run tests and report uncovered changed lines in a PR. Checks cumulative coverage for all changed lines against a specified limit. Useful for CI and code review workflows.');
+  .description('Run tests and report uncovered changed lines in a PR. Checks cumulative coverage for all changed lines against a specified limit. Useful for CI and code review workflows.')
+  .version('1.0.13', '-v, --version', 'Output the current version');
 
 program
   .option('--base <branch>', 'Base branch to compare against (e.g., origin/main)')
@@ -109,9 +110,30 @@ program.action((opts) => {
     options.maxDepth = config.maxDepth;
   }
 
-  options.mode = String(options.mode || 'smart').toLowerCase();
+  // Validate mode
+  options.mode = options.mode || 'smart'; // Default to smart if not provided
+  
+  // Check if mode is invalid (boolean, empty string, etc.)
+  if (typeof options.mode === 'boolean' || options.mode === '') {
+    console.error(`❌ Missing or invalid --mode value.`);
+    console.error(`Available options: fast, smart, full`);
+    console.error(`\nMode descriptions:`);
+    console.error(`  • fast  - Direct execution of mapped test files only`);
+    console.error(`  • smart - Combine source and mapped test files with reverse deps (recommended)`);
+    console.error(`  • full  - Run mapped tests through Jest --findRelatedTests`);
+    console.error(`\nExample: mo3ta-coverage --mode smart`);
+    process.exit(1);
+  }
+
+  options.mode = String(options.mode).toLowerCase();
   if (!['fast', 'smart', 'full'].includes(options.mode)) {
-    console.error(`Invalid mode: ${options.mode}. Expected one of: fast, smart, full.`);
+    console.error(`❌ Invalid mode: "${options.mode}"`);
+    console.error(`Available options: fast, smart, full`);
+    console.error(`\nMode descriptions:`);
+    console.error(`  • fast  - Direct execution of mapped test files only`);
+    console.error(`  • smart - Combine source and mapped test files with reverse deps (recommended)`);
+    console.error(`  • full  - Run mapped tests through Jest --findRelatedTests`);
+    console.error(`\nExample: mo3ta-coverage --mode smart`);
     process.exit(1);
   }
 
