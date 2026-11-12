@@ -40,10 +40,13 @@ function getChangedFiles(BASE_BRANCH) {
   
   try {
     const output = execSync(command).toString();
-    console.log(`Changed files:\n${output}`);
-    return output
+    const changedFiles = output
       .split('\n')
-      .filter(f => f.trim().length > 0 && f.match(/\.(js|ts|jsx|tsx)$/));
+      .filter(f => f.trim().length > 0 && f.match(/\.(js|ts|jsx|tsx)$/))
+      // Defensive: ignore dependency/build/coverage artifacts even if git tracked them
+      .filter(f => !f.match(/(^|\/)(node_modules|coverage|dist|build)\/|(^|\/)\.git\//));
+    console.log(`Changed files:\n${changedFiles.join('\n')}`);
+    return changedFiles;
   } catch (error) {
     console.error('Error getting changed files:', error.message || error);
     return [];
@@ -340,9 +343,13 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
 
   // Cumulative coverage check
   if (totalChanged > 0) {
-    const { overallCoverage, icon } = summarizeCoverageResult(totalChanged, totalNotCovered, COVERAGE_LIMIT);
+    const { overallCoverage, passed, icon } = summarizeCoverageResult(totalChanged, totalNotCovered, COVERAGE_LIMIT);
     console.log(`\n${icon} Overall coverage for all changed lines: ${overallCoverage.toFixed(2)}% (limit: ${COVERAGE_LIMIT}%)`);
     console.log(`Not covered lines: ${totalNotCovered} out of ${totalChanged} changed lines`);
     formatMissedLinesSummary(uncoveredByFile).forEach(line => console.log(line));
+
+    if (!passed) {
+      process.exit(1);
+    }
   }
 }
