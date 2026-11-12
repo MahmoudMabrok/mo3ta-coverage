@@ -53,6 +53,14 @@ function getChangedFiles(BASE_BRANCH) {
   }
 }
 
+export function selectTestFilesForMode(mode, changedTestFiles, mappedTestFiles) {
+  if (mode === 'smart') {
+    return changedTestFiles;
+  }
+
+  return mappedTestFiles;
+}
+
 function runRelatedTests(files, mode) {
   if (files.length === 0) {
     console.log('✅ No changed source files found.');
@@ -133,12 +141,23 @@ function runRelatedTests(files, mode) {
       exit(1);
     }
   } else if (mode === 'smart') {
-    console.log(`\n📝 Test strategy: smart (Run only mapped test files, no Jest dependency traversal)`);
-    console.log(`   Test files: ${finalTestFiles.length}`);
+    // Smart mode is intentionally scoped to the changed files in the diff.
+    // Mapped tests can include unchanged files (especially when a source file
+    // is imported by a broad test suite), which makes smart mode unexpectedly
+    // run the whole suite. Only changed test files belong in this mode.
+    const changedTestFiles = selectTestFilesForMode(mode, testFiles, finalTestFiles);
+    if (changedTestFiles.length === 0) {
+      console.log('\n⚠️  No changed test files found to run in smart mode.');
+      console.log('Change a test file or use --mode full to run related tests for changed source files.');
+      exit(0);
+    }
+
+    console.log(`\n📝 Test strategy: smart (Run only changed test files, no Jest dependency traversal)`);
+    console.log(`   Test files: ${changedTestFiles.length}`);
     console.log(`   Source files for coverage: ${sourceFiles.length}`);
     console.log('   Files passed to Jest:');
-    finalTestFiles.forEach(file => console.log(`     - ${file}`));
-    const command = `npx jest --passWithNoTests --coverage ${finalTestFiles.join(' ')}`;
+    changedTestFiles.forEach(file => console.log(`     - ${file}`));
+    const command = `npx jest --passWithNoTests --coverage ${changedTestFiles.join(' ')}`;
     console.log(`   Jest command: ${command}`);
 
     try {

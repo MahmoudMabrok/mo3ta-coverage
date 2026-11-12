@@ -10,14 +10,14 @@ mo3ta-coverage --mode smart --base origin/main --limit 80
 
 ## Why `smart`
 
-`smart` avoids Jest dependency traversal by running only the mapped test files directly (test files found via naming conventions, plus a fallback import scan that finds spec files referencing the changed source file regardless of their naming). That makes it the most predictable mode for large projects.
+`smart` avoids Jest dependency traversal by running only test files that are themselves changed in the diff. It never expands to every test file related to a changed source file, which keeps the run predictable for large projects.
 
 ## Mode Comparison
 
 | Mode | What Jest Receives | Traversal | Typical Outcome |
 |------|--------------------|-----------|-----------------|
 | `fast` | mapped test files | none | fastest run |
-| `smart` | mapped test files (naming + import scan) | none | best balance |
+| `smart` | changed test files only | none | predictable changed-file check |
 | `full` | mapped test files via `--findRelatedTests` | yes | can expand widely |
 
 ## Project Setup

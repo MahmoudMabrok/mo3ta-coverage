@@ -5,6 +5,7 @@ import {
   classifyChangedLineCoverage,
   formatMissedLinesSummary,
   parseLcov,
+  selectTestFilesForMode,
   summarizeCoverageResult
 } from './cli.js';
 
@@ -88,6 +89,20 @@ describe('summarizeCoverageResult', () => {
     expect(result.overallCoverage).toBe(60);
     expect(result.passed).toBe(false);
     expect(result.icon).toBe('🚨');
+  });
+});
+
+describe('selectTestFilesForMode', () => {
+  const changedTests = ['src/changed.test.js'];
+  const mappedTests = ['src/changed.test.js', 'src/unchanged.test.js'];
+
+  it('limits smart mode to test files changed in the diff', () => {
+    expect(selectTestFilesForMode('smart', changedTests, mappedTests)).toEqual(changedTests);
+  });
+
+  it('keeps mapped tests for non-smart modes', () => {
+    expect(selectTestFilesForMode('fast', changedTests, mappedTests)).toEqual(mappedTests);
+    expect(selectTestFilesForMode('full', changedTests, mappedTests)).toEqual(mappedTests);
   });
 });
 
