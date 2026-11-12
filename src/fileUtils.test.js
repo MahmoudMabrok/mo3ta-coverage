@@ -1,5 +1,7 @@
-import { getJsOnlyFiles, separateSourceAndTestFiles, findTestFilesForSource } from './fileUtils';
+import { getJsOnlyFiles, separateSourceAndTestFiles, findTestFilesForSource, findTestFilesByImport } from './fileUtils';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 describe('getJsOnlyFiles', () => {
     const files = [
@@ -230,5 +232,90 @@ describe('findTestFilesForSource', () => {
         const result = findTestFilesForSource('src/components/Button.jsx');
         
         expect(result).toContain('src/components/Button.test.jsx');
+    });
+});
+describe('findTestFilesByImport', () => {
+    let tempDir;
+
+    function createFixture(structure) {
+        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mo3ta-import-'));
+        Object.entries(structure).forEach(([filePath, content]) => {
+            const absolutePath = path.join(tempDir, filePath);
+            fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+            fs.writeFileSync(absolutePath, content);
+        });
+        return tempDir;
+    }
+
+    afterEach(() => {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('finds a spec file with a different name that imports the source file', () => {
+        const root = createFixture({
+            'src/utils/helper.js': 'export const add = (a, b) => a + b;',
+            'src/utils/custom-name.spec.js': "import { add } from './helper';\n"
+        });
+
+        const result = findTestFilesByImport('src/utils/helper.js', root);
+
+        expect(result).toEqual(['src/utils/custom-name.spec.js']);
+    });
+
+    it('resolves imports with explicit extensions', () => {
+        const root = createFixture({
+            'src/utils/helper.ts': 'export const add = (a, b) => a + b;',
+            'src/renamed.test.ts': "import { add } from './utils/helper.js';\n"
+        });
+
+        const result = findTestFilesByImport('src/utils/helper.ts', root);
+
+        expect(result).toEqual(['src/renamed.test.ts']);
+    });
+
+    it('matches alias imports by path suffix', () => {
+        const root = createFixture({
+            'src/utils/helper.js': 'export const add = (a, b) => a + b;',
+            'src/alias.test.js': "import { add } from '@/utils/helper';\n"
+        });
+
+        const result = findTestFilesByImport('src/utils/helper.js', root);
+
+        expect(result).toEqual(['src/alias.test.js']);
+    });
+
+    it('resolves directory imports to the source file index', () => {
+        const root = createFixture({
+            'src/utils/index.js': "export * from './helper';",
+            'src/utils/helper.js': 'export const add = (a, b) => a + b;',
+            'src/index-import.test.js': "import { add } from './utils';\n"
+        });
+
+        const result = findTestFilesByImport('src/utils/index.js', root);
+
+        expect(result).toEqual(['src/index-import.test.js']);
+    });
+
+    it('returns empty array when no test file imports the source', () => {
+        const root = createFixture({
+            'src/utils/helper.js': 'export const add = (a, b) => a + b;',
+            'src/unrelated.test.js': "import { other } from './other';\n"
+        });
+
+        const result = findTestFilesByImport('src/utils/helper.js', root);
+
+        expect(result).toEqual([]);
+    });
+
+    it('skips node_modules when scanning', () => {
+        const root = createFixture({
+            'src/utils/helper.js': 'export const add = (a, b) => a + b;',
+            'node_modules/pkg/dep.test.js': "import { add } from '../../src/utils/helper';\n",
+            'src/real.test.js': "import { add } from './utils/helper';\n"
+        });
+
+        const result = findTestFilesByImport('src/utils/helper.js', root);
+
+        expect(result).toEqual(['src/real.test.js']);
     });
 });

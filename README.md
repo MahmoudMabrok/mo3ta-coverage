@@ -35,7 +35,7 @@ mo3ta-coverage --mode smart --base origin/main --limit 80
 ## Modes
 
 - `fast`: Direct execution of mapped test files only. No Jest dependency traversal.
-- `smart`: Direct execution of changed source files plus mapped test files. No Jest dependency traversal.
+- `smart`: Direct execution of mapped test files (found by naming convention, with an import-scan fallback for spec files that don't share the source file's name). No Jest dependency traversal.
 - `full`: Runs mapped test files through `jest --findRelatedTests`.
 
 ## Recommended Mode

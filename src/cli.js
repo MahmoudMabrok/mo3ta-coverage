@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { exit } from 'process';
 import { verifyBaseBranchExists, verifyGitRepoExists } from './gitUtils.js';
-import { getJsOnlyFiles, separateSourceAndTestFiles, findTestFilesForSource } from './fileUtils.js';
+import { getJsOnlyFiles, separateSourceAndTestFiles, findTestFilesForSource, findTestFilesByImport } from './fileUtils.js';
 
 export function main(options) {
   try {
@@ -78,9 +78,20 @@ function runRelatedTests(files, mode) {
   const mappedTests = new Map(); // Track which tests map to which source files
 
   sourceFiles.forEach(sourceFile => {
-    const relatedTests = findTestFilesForSource(sourceFile);
+    let relatedTests = findTestFilesForSource(sourceFile);
+    let matchType = 'naming convention';
+
+    // Fallback: spec files don't have to follow the same-name convention.
+    // If no name-based test file exists, look for test files that import this source file.
+    if (relatedTests.length === 0) {
+      relatedTests = findTestFilesByImport(sourceFile);
+      if (relatedTests.length > 0) {
+        matchType = 'import scan';
+      }
+    }
+
     if (relatedTests.length > 0) {
-      console.log(`   ✓ ${sourceFile} → ${relatedTests.length} test file(s)`);
+      console.log(`   ✓ ${sourceFile} → ${relatedTests.length} test file(s) (${matchType})`);
       relatedTests.forEach(test => {
         testFilesToRun.add(test);
         if (!mappedTests.has(test)) {
@@ -119,14 +130,12 @@ function runRelatedTests(files, mode) {
       exit(1);
     }
   } else if (mode === 'smart') {
-    console.log(`\n📝 Test strategy: smart (Combine source and mapped test files, no Jest dependency traversal)`);
+    console.log(`\n📝 Test strategy: smart (Run only mapped test files, no Jest dependency traversal)`);
     console.log(`   Test files: ${finalTestFiles.length}`);
     console.log(`   Source files for coverage: ${sourceFiles.length}`);
-    const allFiles = [...sourceFiles, ...finalTestFiles];
-    console.log(`   Total files passed to Jest: ${allFiles.length}`);
     console.log('   Files passed to Jest:');
-    allFiles.forEach(file => console.log(`     - ${file}`));
-    const command = `npx jest --passWithNoTests --coverage ${allFiles.join(' ')}`;
+    finalTestFiles.forEach(file => console.log(`     - ${file}`));
+    const command = `npx jest --passWithNoTests --coverage ${finalTestFiles.join(' ')}`;
     console.log(`   Jest command: ${command}`);
 
     try {
