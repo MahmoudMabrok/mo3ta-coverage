@@ -22,8 +22,12 @@ export function main(options) {
     const SHOW_COVERED = options.showCovered === true || options.showCovered === 'true';
     const MODE = options.mode;
     const DEPTH = Number.parseInt(options.depth, 10) || 2;
+    const CI = options.ci === true || options.ci === 'true';
+    const CI_REPORT_PATH = options.ciReport
+      ? path.resolve(options.ciReport)
+      : path.resolve('coverage', 'mo3ta-coverage-report.md');
 
-    console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE} \nDepth: ${DEPTH}`);
+    console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE} \nDepth: ${DEPTH} \nCI Mode: ${CI}`);
 
     const explicitFiles = getExplicitFiles(options);
     let changedFiles;
@@ -38,7 +42,7 @@ export function main(options) {
     }
 
     runRelatedTests(changedFiles, MODE, DEPTH);
-    reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED);
+    reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED, CI, CI_REPORT_PATH);
   } catch (error) {
     console.error('❌ An unexpected error occurred:', error.message || error);
     exit(1);
@@ -335,6 +339,42 @@ export function summarizeCoverageResult(totalChanged, totalNotCovered, coverageL
   };
 }
 
+export function buildMarkdownCoverageReport(rows, { overallCoverage, changedLinesLimit, totalChanged, totalNotCovered }) {
+  const lines = [
+    '# mo3ta-coverage report',
+    '',
+    '| Status | File | Changed coverable lines | Covered | Uncovered | Coverage |',
+    '| --- | --- | ---: | ---: | ---: | ---: |'
+  ];
+
+  rows.forEach(({ filePath, covered, uncovered, trackedChangedLines, fileCoverage, status }) => {
+    lines.push(
+      `| ${status} | \`${filePath}\` | ${trackedChangedLines} | ${covered} | ${uncovered} | ${fileCoverage} |`
+    );
+  });
+
+  if (totalChanged > 0) {
+    lines.push(
+      `| **Overall** | — | ${totalChanged} | ${totalChanged - totalNotCovered} | ${totalNotCovered} | ${overallCoverage}% |`
+    );
+    lines.push('');
+    lines.push(
+      `Overall coverage: **${overallCoverage}%** (limit: ${changedLinesLimit}%) — ` +
+      `${totalChanged - totalNotCovered}/${totalChanged} changed lines covered, ${totalNotCovered} uncovered.`
+    );
+  } else {
+    lines.push('');
+    lines.push('**No coverable changed lines found.**');
+  }
+
+  return lines.join('\n');
+}
+
+export function writeMarkdownReport(markdown, reportPath) {
+  fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+  fs.writeFileSync(reportPath, markdown + '\n', 'utf8');
+}
+
 export function formatMissedLinesSummary(uncoveredByFile) {
   if (uncoveredByFile.length === 0) {
     return [];
@@ -351,40 +391,53 @@ export function formatMissedLinesSummary(uncoveredByFile) {
   ];
 }
 
-function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED) {
+function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED, CI = false, CI_REPORT_PATH) {
   if (!fs.existsSync(LCOV_PATH)) {
     console.error('❌ lcov.info not found. Make sure coverage ran correctly.');
     process.exit(1);
   }
 
-  const coverageByFile = parseLcov(LCOV_PATH);
+  if (CI) {
+    // In CI mode keep the console output clean: results go in the markdown
+    // table below and are also saved to a file for CI to read.
+    console.error(`ℹ️  CI mode enabled. Coverage table will be saved to: ${CI_REPORT_PATH}`);
+  } else {
+    console.log(`\n🔍 Checking coverage of changed lines vs branch: ${BASE_BRANCH}\n`);
+  }
 
-  console.log(`\n🔍 Checking coverage of changed lines vs branch: ${BASE_BRANCH}\n`);
+  const coverageByFile = parseLcov(LCOV_PATH);
 
   changedFiles = getJsOnlyFiles(changedFiles);
 
   if (changedFiles.length === 0) {
-    console.log('✅ No relevant files found for coverage check.');
+    if (!CI) {
+      console.log('✅ No relevant files found for coverage check.');
+    }
     return;
   }
 
-  console.log('Files with changed lines:', changedFiles.join('\n'));
+  if (!CI) {
+    console.log('Files with changed lines:', changedFiles.join('\n'));
+  }
 
   let totalChanged = 0;
   let totalNotCovered = 0;
   const uncoveredByFile = [];
+  const rows = [];
 
   changedFiles.forEach(relPath => {
     const absPath = path.resolve(relPath);
     const addedLines = getChangedLines(relPath, BASE_BRANCH);
 
     if (addedLines.length === 0) {
-      console.log(`ℹ️  ${absPath} - No changed lines detected.`);
+      if (!CI) {
+        console.log(`ℹ️  ${absPath} - No changed lines detected.`);
+      }
       return;
     }
 
     const fileCoverage = coverageByFile[absPath];
-    if (!fileCoverage) {
+    if (!fileCoverage && !CI) {
       console.log(`⚠️  No coverage info for: ${absPath}`);
     }
 
@@ -404,29 +457,60 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
       });
     }
 
-    if (uncoveredLines.length > 0) {
-      console.log(`🚨 ${absPath} - Uncovered changed lines: [${uncoveredLines.join(', ')}]`);
-    } else if (trackedChangedLines > 0) {
-      console.log(`✅ ${absPath} - All changed lines are covered`);
-    }
+    rows.push({
+      filePath: relPath,
+      covered: coveredLines.length,
+      uncovered: uncoveredLines.length,
+      trackedChangedLines,
+      fileCoverage: trackedChangedLines > 0
+        ? `${((coveredLines.length / trackedChangedLines) * 100).toFixed(2)}%`
+        : '-',
+      status: uncoveredLines.length > 0 ? '🚨' : trackedChangedLines > 0 ? '✅' : 'ℹ️'
+    });
 
-    console.log(`   Total coverable changed lines: ${trackedChangedLines}, Covered: ${coveredLines.length}, Uncovered: ${uncoveredLines.length}`)
-    if (SHOW_COVERED && coveredLines.length > 0) {
-      console.log(`   Covered lines: [${coveredLines.join(', ')}]`);
-    }
-    if (trackedChangedLines > 0) {
-      console.log(`   Coverage for changed lines: ${((coveredLines.length / trackedChangedLines) * 100).toFixed(2)}%`);
-    } else {
-      console.log(`   No coverable lines in this file's changed lines (e.g., imports, comments).`);
+    if (!CI) {
+      if (uncoveredLines.length > 0) {
+        console.log(`🚨 ${absPath} - Uncovered changed lines: [${uncoveredLines.join(', ')}]`);
+      } else if (trackedChangedLines > 0) {
+        console.log(`✅ ${absPath} - All changed lines are covered`);
+      }
+
+      console.log(`   Total coverable changed lines: ${trackedChangedLines}, Covered: ${coveredLines.length}, Uncovered: ${uncoveredLines.length}`)
+      if (SHOW_COVERED && coveredLines.length > 0) {
+        console.log(`   Covered lines: [${coveredLines.join(', ')}]`);
+      }
+      if (trackedChangedLines > 0) {
+        console.log(`   Coverage for changed lines: ${((coveredLines.length / trackedChangedLines) * 100).toFixed(2)}%`);
+      } else {
+        console.log(`   No coverable lines in this file's changed lines (e.g., imports, comments).`);
+      }
     }
   });
 
   // Cumulative coverage check
+  const { overallCoverage, passed, icon } = totalChanged > 0
+    ? summarizeCoverageResult(totalChanged, totalNotCovered, COVERAGE_LIMIT)
+    : { overallCoverage: null, passed: true, icon: '✅' };
+
+  if (CI) {
+    const report = buildMarkdownCoverageReport(rows, {
+      overallCoverage: overallCoverage === null ? null : overallCoverage.toFixed(2),
+      changedLinesLimit: COVERAGE_LIMIT,
+      totalChanged,
+      totalNotCovered
+    });
+
+    writeMarkdownReport(report, CI_REPORT_PATH);
+    console.log(report);
+    console.error(`📄 Coverage table saved to: ${CI_REPORT_PATH}`);
+  }
+
   if (totalChanged > 0) {
-    const { overallCoverage, passed, icon } = summarizeCoverageResult(totalChanged, totalNotCovered, COVERAGE_LIMIT);
-    console.log(`\n${icon} Overall coverage for all changed lines: ${overallCoverage.toFixed(2)}% (limit: ${COVERAGE_LIMIT}%)`);
-    console.log(`Not covered lines: ${totalNotCovered} out of ${totalChanged} changed lines`);
-    formatMissedLinesSummary(uncoveredByFile).forEach(line => console.log(line));
+    if (!CI) {
+      console.log(`\n${icon} Overall coverage for all changed lines: ${overallCoverage.toFixed(2)}% (limit: ${COVERAGE_LIMIT}%)`);
+      console.log(`Not covered lines: ${totalNotCovered} out of ${totalChanged} changed lines`);
+      formatMissedLinesSummary(uncoveredByFile).forEach(line => console.log(line));
+    }
 
     if (!passed) {
       process.exit(1);

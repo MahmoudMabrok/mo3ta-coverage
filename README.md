@@ -44,6 +44,8 @@ mo3ta-coverage --mode smart --base origin/main --limit 80
 | `--depth <number>` | Max reverse-import depth used by `smart` (`1` or `2` recommended) | `2` |
 | `--files <files...>` | Scan only these files instead of auto-detecting changed files (space- or comma-separated) | – |
 | `--filesFrom <path>` | Read the file list to scan from a newline-separated file | – |
+| `--ci <bool>` | CI mode: emit results as a markdown table and save it to a file so CI can read it without parsing logs | `false` |
+| `--ciReport <path>` | Where to save the CI markdown table | `coverage/mo3ta-coverage-report.md` |
 
 ## Scanning Selected Files
 
@@ -66,6 +68,25 @@ mo3ta-coverage --filesFrom changed.txt --base origin/main
 Explicitly provided files skip git changed-file detection. Their changed lines
 are still computed against `--base`, so only lines that differ from the base
 branch are counted toward coverage.
+
+## CI Mode
+
+Pass `--ci true` to print the coverage results as a markdown table **and**
+save that same table to a file (default: `coverage/mo3ta-coverage-report.md`,
+configurable with `--ciReport`), so a CI job can read only the table instead
+of parsing through the logs:
+
+```sh
+mo3ta-coverage --mode smart --base origin/main --ci true
+# or save the table elsewhere
+mo3ta-coverage --ci true --ciReport report.md
+```
+
+The table includes a per-file breakdown plus an **Overall** row with the
+overall coverage percentage, and a summary line showing the limit. The exit
+code is unchanged: the run still fails when changed-line coverage is below
+`--limit`. In CI mode the verbose per-file console output is replaced by the
+markdown table.
 
 ## Modes
 

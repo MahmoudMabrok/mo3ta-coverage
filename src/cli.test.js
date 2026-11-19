@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
 import {
+  buildMarkdownCoverageReport,
   classifyChangedLineCoverage,
   formatMissedLinesSummary,
   getChangedFiles,
@@ -10,7 +11,8 @@ import {
   normalizeExplicitFiles,
   parseLcov,
   readExplicitFilesFromFile,
-  summarizeCoverageResult
+  summarizeCoverageResult,
+  writeMarkdownReport
 } from './cli.js';
 
 function writeLcovFixture(records) {
@@ -114,6 +116,49 @@ describe('formatMissedLinesSummary', () => {
 
   it('returns no summary lines when no files have missed lines', () => {
     expect(formatMissedLinesSummary([])).toEqual([]);
+  });
+});
+
+describe('buildMarkdownCoverageReport', () => {
+  it('renders a markdown table with per-file rows and an overall line', () => {
+    const report = buildMarkdownCoverageReport(
+      [
+        { filePath: 'src/a.js', covered: 4, uncovered: 1, trackedChangedLines: 5, fileCoverage: '80.00%', status: '🚨' },
+        { filePath: 'src/b.js', covered: 3, uncovered: 0, trackedChangedLines: 3, fileCoverage: '100.00%', status: '✅' }
+      ],
+      { overallCoverage: '87.50', changedLinesLimit: 80, totalChanged: 8, totalNotCovered: 1 }
+    );
+
+    expect(report).toContain('| Status | File | Changed coverable lines | Covered | Uncovered | Coverage |');
+    expect(report).toContain('| --- | --- | ---: | ---: | ---: | ---: |');
+    expect(report).toContain('| 🚨 | `src/a.js` | 5 | 4 | 1 | 80.00% |');
+    expect(report).toContain('| ✅ | `src/b.js` | 3 | 3 | 0 | 100.00% |');
+    expect(report).toContain('| **Overall** | — | 8 | 7 | 1 | 87.50% |');
+    expect(report).toContain('Overall coverage: **87.50%** (limit: 80%) — 7/8 changed lines covered, 1 uncovered.');
+  });
+
+  it('notes when there are no coverable changed lines', () => {
+    const report = buildMarkdownCoverageReport([], {
+      overallCoverage: null,
+      changedLinesLimit: 80,
+      totalChanged: 0,
+      totalNotCovered: 0
+    });
+
+    expect(report).toContain('**No coverable changed lines found.**');
+  });
+});
+
+describe('writeMarkdownReport', () => {
+  it('creates parent directories and writes the report file', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mo3ta-report-'));
+    const reportPath = path.join(tempDir, 'nested', 'report.md');
+
+    writeMarkdownReport('# report\n', reportPath);
+
+    expect(fs.readFileSync(reportPath, 'utf8')).toBe('# report\n\n');
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 });
 
