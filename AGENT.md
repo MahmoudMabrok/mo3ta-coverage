@@ -49,6 +49,8 @@ There is no lint/typecheck/format script. `npm run build` currently outputs
 | `src/cli.test.js` | Tests for lcov parsing, changed-line classification, summaries. |
 | `src/fileUtils.test.js` | Tests for file filtering, naming conventions, import scanning. |
 | `jest.config.json` | Jest config: `**/src/**/*.test.js`, node env, babel-jest transform. |
+| `.github/workflows/dependency-audit.yml` | Daily dependency security audit; opens/updates a tracked issue on findings. |
+| `.github/scripts/audit-open-issue.mjs` | Issue manager for the audit workflow (`gh` CLI). |
 | `.mo3ta-coverage.json` | Optional per-project config (gitignored here). |
 
 ## Execution flow
@@ -125,6 +127,9 @@ import a module which imports the changed file.
   the matching `*.test.js` file.
 - Do not add runtime dependencies without a clear need; the package ships only
   `commander`.
+- All dependencies in `package.json` are pinned to exact versions (no `^`/`~`);
+  transitive fixes go through `overrides`. `npm audit` must be clean before
+  dependency changes are merged.
 
 ## Gotchas
 
@@ -140,5 +145,7 @@ import a module which imports the changed file.
 - The config subcommand writes `.mo3ta-coverage.json` in `process.cwd()`.
 - CLI options with commander defaults (`mode`, `depth`) override config unless
   you check `program.getOptionValueSource(...) === 'cli'`.
-- Shell commands are built as strings and run with `execSync`; quote/escape file
-  paths if this ever needs to support spaces.
+- Git and Jest are always invoked with argument arrays (`execFileSync`),
+  never through a shell, so refs and file paths cannot inject commands.
+  `--base` values are validated with `git rev-parse --verify` before use;
+  file paths in `git diff` are protected by the `--` pathspec separator.

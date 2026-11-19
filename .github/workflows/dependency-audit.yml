@@ -1,0 +1,58 @@
+name: Dependency security audit
+
+on:
+  schedule:
+    - cron: '17 6 * * *'  # daily at 06:17 UTC
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  labels: write
+
+concurrency:
+  group: dependency-audit
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        id: audit
+        # Exit codes: 0 = no known vulnerabilities, 1 = vulnerabilities found,
+        # >=2 = audit could not complete. The JSON output is kept for the
+        # issue step even when vulnerabilities are found.
+        run: |
+          npm audit --json > audit.json
+          rc=$?
+          if [ "$rc" -ge 2 ]; then
+            echo "::error::npm audit failed with exit code $rc"
+            exit 1
+          fi
+          echo "vulnerable=$([ "$rc" -eq 1 ] && echo 1 || echo 0)" >> "$GITHUB_OUTPUT"
+          echo '--- npm audit ---'
+          npm audit || true
+
+      - name: Open or update the dependency-vulnerability issue
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          AUDIT_RESULT: ${{ steps.audit.outputs.vulnerable }}
+        run: node .github/scripts/audit-open-issue.mjs audit.json

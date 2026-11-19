@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { exit } from 'process';
@@ -118,26 +118,37 @@ export function getExplicitFiles(options = {}) {
 }
 
 export function getChangedFiles(BASE_BRANCH) {
-  // Check if BASE_BRANCH exists
+  // Check if BASE_BRANCH exists (also rejects ref-like options before use)
   verifyBaseBranchExists(BASE_BRANCH);
 
   // Compare the merge base with HEAD so every file changed on this branch is
   // included, regardless of which author committed it.
+  //
+  // Git is always invoked with an argument array (never through a shell) so
+  // refs and file paths can't inject commands, and output is de-duplicated
+  // in JS instead of piping through `sort -u`.
   try {
-    const mergeBase = execSync(`git merge-base HEAD ${BASE_BRANCH}`).toString().trim();
+    const gitFiles = (args) => execFileSync('git', args, { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
 
-    const command = `(
-      git diff --name-only --diff-filter=AM ${mergeBase}..HEAD
-      git diff --name-only --diff-filter=AM
-      git diff --cached --name-only --diff-filter=AM
-    ) | sort -u`;
+    const mergeBase = gitFiles(['merge-base', 'HEAD', BASE_BRANCH]).trim();
 
-    const output = execSync(command).toString();
-    const changedFiles = output
-      .split('\n')
+    const seen = new Set();
+    const changedFiles = [
+      // Added or renamed files between the merge base and HEAD
+      gitFiles(['diff', '--name-only', '--diff-filter=AM', `${mergeBase}..HEAD`]),
+      // Unstaged changes in the working tree
+      gitFiles(['diff', '--name-only', '--diff-filter=AM']),
+      // Staged changes
+      gitFiles(['diff', '--cached', '--name-only', '--diff-filter=AM'])
+    ]
+      .flatMap(output => output.split('\n'))
       .filter(f => f.trim().length > 0 && f.match(/\.(js|ts|jsx|tsx)$/))
       // Defensive: ignore dependency/build/coverage artifacts even if git tracked them
-      .filter(f => !f.match(/(^|\/)(node_modules|coverage|dist|build)\/|(^|\/)\.git\//));
+      .filter(f => !f.match(/(^|\/)(node_modules|coverage|dist|build)\/|(^|\/)\.git\//))
+      // De-duplicate (replaces `sort -u`); insertion order keeps first-seen wins
+      .filter(f => (seen.has(f) ? false : (seen.add(f), true)));
+
+    changedFiles.sort();
     console.log(`Changed files:\n${changedFiles.join('\n')}`);
     return changedFiles;
   } catch (error) {
@@ -148,11 +159,15 @@ export function getChangedFiles(BASE_BRANCH) {
 
 let testsFailed = false;
 
-function runJest(command) {
-  console.log(`   Jest command: ${command}`);
+function runJest(jestArgs) {
+  console.log(`   Jest command: npx jest ${jestArgs.join(' ')}`);
 
+  // The locally installed Jest entry point is invoked directly (no shell,
+  // no npx), with an argument array, so file paths with spaces or special
+  // characters can't break the invocation.
   try {
-    execSync(command, { stdio: 'inherit' });
+    const jestBin = path.resolve('node_modules', 'jest', 'bin', 'jest.js');
+    execFileSync(process.execPath, [jestBin, ...jestArgs], { stdio: 'inherit' });
   } catch (err) {
     // Log and continue so the coverage report still runs and CI can
     // surface it. `main` exits non-zero at the end when this happened.
@@ -199,7 +214,7 @@ function runRelatedTests(files, mode, depth = 2) {
     console.log('   Files passed to Jest:');
     jestTargets.forEach(file => console.log(`     - ${file}`));
 
-    runJest(`npx jest --findRelatedTests --passWithNoTests --coverage ${jestTargets.join(' ')}`);
+    runJest(['--findRelatedTests', '--passWithNoTests', '--coverage', ...jestTargets]);
     return;
   }
 
@@ -256,11 +271,13 @@ function runRelatedTests(files, mode, depth = 2) {
     console.log(`   Source files detected: ${sourceFiles.length}`);
   }
 
-  runJest(`npx jest --passWithNoTests --coverage ${finalTestFiles.join(' ')}`);
+  runJest(['--passWithNoTests', '--coverage', ...finalTestFiles]);
 }
 
 function getChangedLines(filePath, BASE_BRANCH) {
-  const diff = execSync(`git diff -U0 ${BASE_BRANCH} -- ${filePath}`).toString();
+  // Argument array + `--` separator keeps file paths (and the ref, already
+  // validated in verifyBaseBranchExists) out of any shell interpretation.
+  const diff = execFileSync('git', ['diff', '-U0', BASE_BRANCH, '--', filePath], { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
   const lines = [];
 
   const hunkRegex = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm;
