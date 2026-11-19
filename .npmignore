@@ -1,3 +1,6 @@
 /.github
 /video
 /docs
+/.idea
+/.commandcode
+/coverage

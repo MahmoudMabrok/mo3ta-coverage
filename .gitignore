@@ -5,3 +5,6 @@ coverage/
 *.log
 .mo3ta-coverage.json
 video/renders/
+.idea
+
+
