@@ -4,6 +4,12 @@
 
 mo3ta-coverage checks coverage for changed lines in a pull request. It finds changed source files, maps them to likely test files, runs Jest in a selected execution mode, and validates changed-line coverage against a threshold.
 
+## Demo
+
+https://github.com/user-attachments/assets/5241bfa7-ba66-4405-bf42-fd6522be56a6
+
+A quick walkthrough of changed-file detection, related-test selection, and changed-line coverage.
+
 ## Features
 
 - Detects changed JS/TS files from git history and working tree, for all authors
