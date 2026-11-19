@@ -201,6 +201,39 @@ npm install
 npm test
 ```
 
+## Security & dependencies
+
+All dependencies in [`package.json`](package.json) are **pinned to exact
+versions** (no `^` or `~`), so installs are reproducible and unaffected by
+upstream releases. The `package-lock.json` is committed and CI installs with
+`npm ci` against it.
+
+### Vulnerability policy
+
+- Transitive dependencies with known advisories are pinned to fixed versions
+  through `overrides` in `package.json` when a compatible upstream release is
+  not yet available (this keeps Jest 30 instead of downgrading for a
+  transitive `glob`/`minimatch` advisory).
+- `npm audit` must report **0 known vulnerabilities** before changes that
+  touch dependencies are merged.
+
+### Automated daily audit
+
+The [`Dependency security audit` workflow](.github/workflows/dependency-audit.yml)
+runs `npm audit` **daily** (plus on push, pull request, and manual dispatch):
+
+- On vulnerabilities: opens (or refreshes) a single tracked issue —
+  **`[Security] Vulnerable dependencies`** (label: `security`) — with the
+  summary table, affected packages, advisory links, and fix steps.
+- When the audit is clean again, it closes that issue automatically.
+- The issue is managed by [`.github/scripts/audit-open-issue.mjs`](.github/scripts/audit-open-issue.mjs)
+  via the `gh` CLI, so repeated runs never create duplicates.
+
+## Pull requests
+
+Security hardening (shell-injection-safe git/jest invocations) and dependency
+pinning were introduced in [#12](https://github.com/MahmoudMabrok/mo3ta-coverage/pull/12).
+
 ## License
 
 MIT
