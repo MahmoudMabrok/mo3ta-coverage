@@ -20,6 +20,61 @@ A quick walkthrough of changed-file detection, related-test selection, and chang
 - Parses `lcov.info` and reports uncovered changed lines
 - Enforces a minimum coverage threshold for changed lines
 
+## GitHub Action
+
+[mo3ta-coverage-action](https://github.com/MahmoudMabrok/mo3ta-coverage-action)
+wraps the CLI as a reusable GitHub Action: it bundles the tool, runs it on
+Node 20, and appends the markdown coverage table to the job summary
+automatically.
+
+It also auto-resolves what to diff against based on the triggering event,
+so you usually don't set `base` at all:
+
+| Event | Base used |
+|-------|-----------|
+| `pull_request` | the PR's exact base commit |
+| `push` | the previous commit (`HEAD~1`) |
+| other (schedule, dispatch) | `origin/main` |
+
+### Minimal setup (recommended)
+
+```yaml
+# .github/workflows/changed-line-coverage.yml
+name: Changed-line coverage
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  changed-line-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history needed for the merge-base diff
+      - run: npm ci
+      - uses: MahmoudMabrok/mo3ta-coverage-action@v1
+```
+
+### Customizing
+
+```yaml
+      - uses: MahmoudMabrok/mo3ta-coverage-action@v1
+        with:
+          base: origin/develop  # explicit base (overrides auto-resolution)
+          mode: smart           # fast | smart (default) | full
+          depth: 2              # smart mode reverse-import depth
+          limit: 80             # minimum changed-line coverage, %
+          # ci: true            # default; clean output + markdown table
+          # report-to-summary: true  # default; append table to job summary
+```
+
+All inputs, and how to scope the run to specific files (`files` /
+`files-from`), are documented in the
+[action README](https://github.com/MahmoudMabrok/mo3ta-coverage-action#inputs).
+
 ## Installation
 
 ```sh
@@ -87,6 +142,11 @@ overall coverage percentage, and a summary line showing the limit. The exit
 code is unchanged: the run still fails when changed-line coverage is below
 `--limit`. In CI mode the verbose per-file console output is replaced by the
 markdown table.
+
+If you use the
+[GitHub Action](https://github.com/MahmoudMabrok/mo3ta-coverage-action),
+`--ci` is enabled for you and the table is appended to the job summary
+automatically — no `run:` step needed.
 
 ## Modes
 
