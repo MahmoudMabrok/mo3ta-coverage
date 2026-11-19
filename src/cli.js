@@ -43,6 +43,11 @@ export function main(options) {
 
     runRelatedTests(changedFiles, MODE, DEPTH);
     reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED, CI, CI_REPORT_PATH);
+
+    if (testsFailed) {
+      console.error('\n❌ Finished with test failures (see Jest output above).');
+      exit(1);
+    }
   } catch (error) {
     console.error('❌ An unexpected error occurred:', error.message || error);
     exit(1);
@@ -141,14 +146,18 @@ export function getChangedFiles(BASE_BRANCH) {
   }
 }
 
+let testsFailed = false;
+
 function runJest(command) {
   console.log(`   Jest command: ${command}`);
 
   try {
     execSync(command, { stdio: 'inherit' });
   } catch (err) {
+    // Log and continue so the coverage report still runs and CI can
+    // surface it. `main` exits non-zero at the end when this happened.
+    testsFailed = true;
     console.error('❌ Tests failed:', err.message || err);
-    exit(1);
   }
 }
 
