@@ -25,7 +25,18 @@ export function main(options) {
 
     console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE} \nDepth: ${DEPTH}`);
 
-    const changedFiles = getChangedFiles(BASE_BRANCH);
+    const explicitFiles = getExplicitFiles(options);
+    let changedFiles;
+
+    if (explicitFiles.length > 0) {
+      // A base branch is still needed to compute the changed lines of each file.
+      verifyBaseBranchExists(BASE_BRANCH);
+      console.log(`Scanning ${explicitFiles.length} explicitly provided file(s) (git changed-file detection skipped):\n${explicitFiles.join('\n')}`);
+      changedFiles = explicitFiles;
+    } else {
+      changedFiles = getChangedFiles(BASE_BRANCH);
+    }
+
     runRelatedTests(changedFiles, MODE, DEPTH);
     reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED);
   } catch (error) {
@@ -35,17 +46,83 @@ export function main(options) {
 }
 
 
-function getChangedFiles(BASE_BRANCH) {
+/**
+ * Normalizes a user-provided file list into repo-relative paths.
+ * Accepts an array or a comma-separated string, trims entries, removes
+ * duplicates, converts absolute paths under `root` to relative ones, and
+ * drops dependency/build artifacts.
+ * @param {string|string[]} input
+ * @param {string} [root]
+ * @returns {string[]}
+ */
+export function normalizeExplicitFiles(input, root = process.cwd()) {
+  const values = Array.isArray(input) ? input : [input];
+
+  const files = values
+    .flatMap(value => String(value ?? '').split(','))
+    .map(file => file.trim())
+    .filter(Boolean)
+    .map(file => {
+      const absolute = path.resolve(root, file);
+      const relative = path.relative(root, absolute);
+      // Keep paths outside the repo root as provided.
+      if (relative.startsWith('..') || path.isAbsolute(relative)) return file;
+      return relative;
+    })
+    .map(file => file.replace(/\\/g, '/'))
+    .filter(file => !file.match(/(^|\/)(node_modules|coverage|dist|build)\/|(^|\/)\.git\//));
+
+  return Array.from(new Set(files));
+}
+
+/**
+ * Reads a newline-separated list of files (for example the output of
+ * `git diff --name-only`) from disk.
+ * @param {string} listPath
+ * @param {string} [root]
+ * @returns {string[]}
+ */
+export function readExplicitFilesFromFile(listPath, root = process.cwd()) {
+  const absolute = path.resolve(root, listPath);
+  const content = fs.readFileSync(absolute, 'utf8');
+  return normalizeExplicitFiles(content.split(/\r?\n/), root);
+}
+
+/**
+ * Resolves the files to scan from CLI options. Returns an empty array when
+ * the user did not provide an explicit list.
+ * @param {{files?: string|string[], filesFrom?: string}} options
+ * @returns {string[]}
+ */
+export function getExplicitFiles(options = {}) {
+  const files = [];
+
+  if (options.files !== undefined && options.files !== null && options.files !== false) {
+    files.push(...normalizeExplicitFiles(options.files));
+  }
+
+  if (options.filesFrom) {
+    files.push(...readExplicitFilesFromFile(options.filesFrom));
+  }
+
+  return Array.from(new Set(files));
+}
+
+export function getChangedFiles(BASE_BRANCH) {
   // Check if BASE_BRANCH exists
   verifyBaseBranchExists(BASE_BRANCH);
 
-  const command = `(
-    git log --pretty=format: --name-only --diff-filter=AM --author="$(git config user.name)" $(git merge-base HEAD ${BASE_BRANCH})..HEAD
-    git diff --name-only --diff-filter=AM
-    git diff --cached --name-only --diff-filter=AM
-  ) | sort -u`;
-  
+  // Compare the merge base with HEAD so every file changed on this branch is
+  // included, regardless of which author committed it.
   try {
+    const mergeBase = execSync(`git merge-base HEAD ${BASE_BRANCH}`).toString().trim();
+
+    const command = `(
+      git diff --name-only --diff-filter=AM ${mergeBase}..HEAD
+      git diff --name-only --diff-filter=AM
+      git diff --cached --name-only --diff-filter=AM
+    ) | sort -u`;
+
     const output = execSync(command).toString();
     const changedFiles = output
       .split('\n')

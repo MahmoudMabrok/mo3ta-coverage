@@ -1,10 +1,13 @@
 # mo3ta-coverage ![NPM Version](https://img.shields.io/npm/v/mo3ta-coverage)
 
+![mo3ta-coverage modes and features](docs/poster.png)
+
 mo3ta-coverage checks coverage for changed lines in a pull request. It finds changed source files, maps them to likely test files, runs Jest in a selected execution mode, and validates changed-line coverage against a threshold.
 
 ## Features
 
-- Detects changed JS/TS files from git history and working tree
+- Detects changed JS/TS files from git history and working tree, for all authors
+- Accepts an explicit file list (`--files` / `--filesFrom`) to control what gets scanned
 - Maps changed source files to related test files, even when names differ
 - Supports three execution modes: `fast`, `smart`, and `full`
 - Walks reverse imports in `smart` mode to a configurable depth (default `2`)
@@ -33,6 +36,30 @@ mo3ta-coverage --mode smart --base origin/main --limit 80
 | `--showCovered <bool>` | Show covered changed lines in output | `false` |
 | `--mode <mode>` | Execution mode: `fast`, `smart`, or `full` | `smart` |
 | `--depth <number>` | Max reverse-import depth used by `smart` (`1` or `2` recommended) | `2` |
+| `--files <files...>` | Scan only these files instead of auto-detecting changed files (space- or comma-separated) | – |
+| `--filesFrom <path>` | Read the file list to scan from a newline-separated file | – |
+
+## Scanning Selected Files
+
+Changed files are detected from git for **all authors**, not just the current
+git user. If you want to control exactly which files are scanned, pass them
+directly. The library still maps them to tests and checks changed-line coverage.
+
+```sh
+# Explicit list (space-separated)
+mo3ta-coverage --files src/a.js src/b.ts --base origin/main
+
+# Explicit list (comma-separated)
+mo3ta-coverage --files src/a.js,src/b.ts --base origin/main
+
+# From a file containing one path per line
+git diff --name-only origin/main > changed.txt
+mo3ta-coverage --filesFrom changed.txt --base origin/main
+```
+
+Explicitly provided files skip git changed-file detection. Their changed lines
+are still computed against `--base`, so only lines that differ from the base
+branch are counted toward coverage.
 
 ## Modes
 

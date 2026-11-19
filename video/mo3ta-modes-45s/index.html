@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1920, height=1080" />
+<title>mo3ta-coverage — modes showcase 45s</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<script src="./gsap.min.js"></script>
+<style>
+:root {
+  --bg: #0f1115;
+  --card: #1a1c22;
+  --border: #2a2d35;
+  --text: #e6e6e6;
+  --bright: #f4f7fb;
+  --muted: #9aa0a6;
+  --accent: #60a5fa;
+  --pass: #22c55e;
+  --warn: #fb923c;
+  --mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  --sans: "Inter", -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+html, body {
+  margin: 0; padding: 0;
+  width: 1920px; height: 1080px;
+  overflow: hidden;
+  background: var(--bg);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+#root { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+.bg { position: absolute; inset: 0; background: var(--bg); }
+.bg-grid {
+  position: absolute; inset: 0;
+  background-image:
+    repeating-linear-gradient(to right, rgba(255,255,255,.035) 0 1px, transparent 1px 52px),
+    repeating-linear-gradient(to bottom, rgba(255,255,255,.035) 0 1px, transparent 1px 52px);
+  mask-image: radial-gradient(circle at 50% 44%, rgba(0,0,0,.92), transparent 78%);
+}
+.glow {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(1000px 560px at 50% -6%, rgba(96,165,250,.2), transparent 68%),
+    radial-gradient(760px 420px at 90% 108%, rgba(34,197,94,.09), transparent 70%);
+}
+.vignette { position: absolute; inset: 0; background: radial-gradient(1500px 960px at 50% 50%, transparent 44%, rgba(0,0,0,.46)); }
+.scene { position: absolute; inset: 0; opacity: 0; }
+.pill {
+  display: inline-flex; align-items: center; gap: 12px;
+  padding: 12px 26px; border-radius: 999px;
+  border: 1px solid rgba(96,165,250,.42);
+  background: rgba(96,165,250,.09);
+  color: var(--accent);
+  font-family: var(--mono); font-size: 18px; font-weight: 500;
+  letter-spacing: .16em; text-transform: uppercase;
+}
+.pill .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--pass); box-shadow: 0 0 14px rgba(34,197,94,.9); }
+.kicker {
+  font-family: var(--mono); font-size: 18px; font-weight: 500;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--accent);
+}
+.scene-title {
+  margin-top: 20px; font-size: 54px; font-weight: 700;
+  letter-spacing: -.03em; line-height: 1.08; color: var(--bright);
+}
+.scene-sub { margin-top: 16px; font-size: 28px; color: var(--muted); }
+
+/* ---------- hook ---------- */
+#hook { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; opacity: 1; }
+.wordmark { margin-top: 34px; font-size: 118px; font-weight: 800; line-height: 1; letter-spacing: -.045em; color: var(--bright); }
+.wordmark .accent { color: var(--accent); }
+.tagline { margin-top: 30px; font-size: 38px; font-weight: 400; letter-spacing: -.01em; color: var(--muted); }
+.rule { width: 260px; height: 3px; margin-top: 42px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent); display: block; }
+
+/* ---------- problem ---------- */
+#problem { padding-top: 156px; box-sizing: border-box; text-align: center; }
+.problem-grid { display: flex; justify-content: center; gap: 56px; margin-top: 62px; }
+.panel {
+  width: 760px; height: 400px; padding: 28px 32px; box-sizing: border-box;
+  border-radius: 18px; border: 1px solid var(--border);
+  background: var(--card); box-shadow: 0 26px 70px rgba(0,0,0,.42); text-align: left;
+}
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--mono); font-size: 14px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--muted);
+}
+.panel-file { color: var(--bright); letter-spacing: 0; text-transform: none; font-size: 19px; }
+.diff {
+  margin-top: 22px; border-radius: 10px; border: 1px solid var(--border);
+  background: #101217; overflow: hidden;
+  font-family: var(--mono); font-size: 20px; line-height: 1.75;
+}
+.diff-line { padding: 0 18px; white-space: nowrap; }
+.diff-line.del { color: #f87171; background: rgba(248,113,113,.07); }
+.diff-line.add { color: #22c55e; background: rgba(34,197,94,.08); }
+.diff-line.ctx { color: var(--muted); }
+.panel-foot { margin-top: 16px; font-family: var(--mono); font-size: 15px; color: var(--muted); }
+.panel-foot .hl { color: var(--warn); }
+.suite-list { margin-top: 22px; font-family: var(--mono); font-size: 19px; line-height: 1.85; color: var(--text); }
+.suite-list .dim { color: var(--muted); }
+.suite-bar { margin-top: 22px; height: 10px; border-radius: 999px; background: #262a33; overflow: hidden; }
+.suite-bar span { display: block; height: 100%; transform-origin: 0 50%; background: linear-gradient(90deg, var(--fail), var(--warn)); }
+.scene-note { margin-top: 34px; font-size: 26px; color: var(--muted); }
+.scene-note b { color: var(--bright); }
+
+/* ---------- mode scenes ---------- */
+.modesc { padding-top: 96px; box-sizing: border-box; text-align: center; }
+.mode-head { display: flex; align-items: center; justify-content: center; gap: 22px; }
+.mode-badge {
+  font-family: var(--mono); font-size: 64px; font-weight: 700;
+  border-radius: 20px; padding: 14px 34px; border: 2px solid;
+}
+#mod-fast .mode-badge { color: var(--warn); border-color: rgba(251,146,60,.55); background: rgba(251,146,60,.08); }
+#mod-smart .mode-badge { color: var(--accent); border-color: rgba(96,165,250,.55); background: rgba(96,165,250,.08); }
+#mod-full .mode-badge { color: var(--pass); border-color: rgba(34,197,94,.55); background: rgba(34,197,94,.08); }
+.mode-head .meta { text-align: left; }
+.mode-head .mm-line { font-family: var(--mono); font-size: 17px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.mode-head .mm-title { margin-top: 8px; font-size: 40px; font-weight: 700; color: var(--bright); letter-spacing: -.02em; }
+.console {
+  width: 1280px; margin: 58px auto 0; padding: 26px 34px; text-align: left;
+  border-radius: 16px; border: 1px solid var(--border);
+  background: #101217; box-shadow: 0 26px 70px rgba(0,0,0,.42);
+  font-family: var(--mono); font-size: 27px; line-height: 1.7;
+}
+.console .c-cmd { color: var(--bright); }
+.console .c-cmd .flag { color: var(--accent); }
+.console .c-out { color: var(--muted); margin-top: 10px; font-size: 22px; }
+.console .c-out .ok { color: var(--pass); }
+.console .c-out .no { color: var(--fail); }
+.console .caret { display: inline-block; width: 13px; height: 30px; margin-left: 4px; vertical-align: -6px; background: var(--accent); }
+
+.graph-row { display: flex; align-items: center; justify-content: center; gap: 30px; margin-top: 58px; }
+.node {
+  width: 430px; height: 176px; padding: 24px 26px; box-sizing: border-box; text-align: left;
+  border-radius: 16px; border: 1px solid var(--border);
+  background: var(--card); box-shadow: 0 24px 60px rgba(0,0,0,.4);
+}
+.node-label {
+  font-family: var(--mono); font-size: 13px; font-weight: 500;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--muted);
+}
+.node-file { margin-top: 16px; font-family: var(--mono); font-size: 22px; font-weight: 500; color: var(--bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-meta { margin-top: 14px; display: flex; align-items: center; gap: 10px; font-size: 16px; color: var(--muted); }
+.tag {
+  display: inline-flex; align-items: center; padding: 5px 11px; border-radius: 6px;
+  font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: .08em;
+}
+.tag.changed { color: var(--warn); background: rgba(251,146,60,.12); border: 1px solid rgba(251,146,60,.32); }
+.tag.hop { color: var(--accent); background: rgba(96,165,250,.12); border: 1px solid rgba(96,165,250,.32); }
+.tag.matched { color: var(--pass); background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.32); }
+.link-zone { position: relative; width: 120px; height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.link-line { width: 120px; height: 2px; background: linear-gradient(90deg, rgba(96,165,250,.22), var(--accent)); transform-origin: 0 50%; display: block; }
+.link-zone.second .link-line { background: linear-gradient(90deg, var(--accent), rgba(34,197,94,.55)); }
+.link-label {
+  position: absolute; top: 6px; width: 150px; text-align: center;
+  font-family: var(--mono); font-size: 14px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent);
+}
+.caption { margin-top: 46px; font-size: 28px; color: var(--muted); }
+.caption b { color: var(--bright); }
+.filelist {
+  width: 1280px; margin: 58px auto 0; padding: 24px 34px; text-align: left;
+  border-radius: 16px; border: 1px solid var(--border);
+  background: #101217; box-shadow: 0 26px 70px rgba(0,0,0,.42);
+  font-family: var(--mono); font-size: 22px; line-height: 1.9;
+}
+.filelist .fl-label { font-size: 14px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+.filelist .fl-row { display: flex; align-items: center; gap: 14px; }
+.filelist .fl-file { color: var(--text); }
+.filelist .fl-yes { color: var(--pass); }
+.filelist .fl-no { color: var(--muted); }
+.filelist .fl-dim { color: var(--muted); }
+
+/* ---------- end ---------- */
+#end { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; opacity: 1; }
+.end-wordmark { margin-top: 26px; font-size: 108px; font-weight: 800; line-height: 1; letter-spacing: -.045em; color: var(--bright); }
+.end-wordmark .accent { color: var(--accent); }
+.end-cmd {
+  margin-top: 40px; display: inline-flex; align-items: center; gap: 18px;
+  padding: 20px 40px; border-radius: 14px;
+  border: 1px solid rgba(96,165,250,.4); background: rgba(96,165,250,.07);
+  font-family: var(--mono); font-size: 32px; color: var(--bright);
+}
+.end-cmd .flag { color: var(--accent); }
+.end-modes { margin-top: 34px; font-family: var(--mono); font-size: 20px; letter-spacing: .08em; color: var(--muted); }
+.end-modes b { font-weight: 600; }
+.end-modes .w { color: var(--warn); }
+.end-modes .a { color: var(--accent); }
+.end-modes .g { color: var(--pass); }
+.end-note { margin-top: 22px; font-size: 22px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="mo3ta-modes-45s" data-width="1920" data-height="1080" data-start="0" data-duration="45">
+<section id="stage" class="clip" data-start="0" data-duration="45" data-track-index="0">
+  <div class="bg"></div>
+  <div class="bg-grid"></div>
+  <div class="glow"></div>
+
+  <section class="scene" id="hook">
+    <div id="h-pill" class="pill"><span class="dot"></span>changed-line coverage</div>
+    <div id="h-title" class="wordmark">mo3ta<span class="accent">-coverage</span></div>
+    <div id="h-tag" class="tagline">Three modes. One changed-line diff.</div>
+    <span id="h-rule" class="rule"></span>
+  </section>
+
+  <section class="scene" id="problem">
+    <div id="p-kicker" class="kicker">The problem</div>
+    <div id="p-title" class="scene-title">Your whole suite is bigger than your change.</div>
+
+    <div class="problem-grid">
+      <div id="diff-panel" class="panel">
+        <div class="panel-head"><span>git diff</span><span class="panel-file">src/utils/helper.js</span></div>
+        <div class="diff">
+          <div class="diff-line ctx"> 1  function sum(a, b) {</div>
+          <div class="diff-line del">-2-    return a + b;</div>
+          <div class="diff-line add">+2+    return Number(a) + Number(b);</div>
+          <div class="diff-line add">+3+  }</div>
+          <div class="diff-line ctx"> 4</div>
+        </div>
+        <div id="diff-foot" class="panel-foot">diff: <span class="hl">3 changed lines</span></div>
+      </div>
+
+      <div id="suite-panel" class="panel">
+        <div class="panel-head"><span>full jest suite</span><span class="panel-file">1,284 tests</span></div>
+        <div class="suite-list">
+          <div>app.test.js <span class="dim">· 214</span></div>
+          <div>cart.test.js <span class="dim">· 189</span></div>
+          <div>auth.test.js <span class="dim">· 161</span></div>
+          <div>ui.test.js <span class="dim">· 142</span></div>
+          <div class="dim">… 11,598 more lines of runtime</div>
+        </div>
+        <div class="suite-bar"><span id="suite-fill"></span></div>
+        <div id="suite-foot" class="panel-foot">to check <span class="hl">3 lines?</span></div>
+      </div>
+    </div>
+
+    <div id="p-note" class="scene-note">mo3ta-coverage answers with <b>three modes</b> — pick how hard it digs.</div>
+  </section>
+
+  <section class="scene modesc" id="mod-fast">
+    <div class="mode-head">
+      <div id="f-badge" class="mode-badge">fast</div>
+      <div id="f-head-meta" class="meta">
+        <div class="mm-line">Mode 1 of 3 · narrowest</div>
+        <div class="mm-title">Names match? We're done.</div>
+      </div>
+    </div>
+
+    <div class="console">
+      <div id="f-line1" class="c-cmd">$ npx mo3ta-coverage <span class="flag">--mode fast</span><span id="f-caret" class="caret"></span></div>
+      <div id="f-out" class="c-out"><span class="ok">✓</span> helper.test.js — name match</div>
+      <div id="f-out2" class="c-out"><span class="no">✗</span> specs/custom-name.spec.js — no traversal, not found</div>
+    </div>
+
+    <div class="graph-row" id="f-nodes">
+      <div id="fn-src" class="node">
+        <div class="node-label">Changed source</div>
+        <div class="node-file">src/utils/helper.js</div>
+        <div class="node-meta"><span class="tag changed">MODIFIED</span><span>3 lines</span></div>
+      </div>
+      <div id="f-link" class="link-zone">
+        <div class="link-label">name · direct import</div>
+        <span class="link-line"></span>
+      </div>
+      <div id="fn-spec" class="node">
+        <div class="node-label">Matched spec</div>
+        <div class="node-file">src/utils/helper.test.js</div>
+        <div class="node-meta"><span class="tag matched">RUN</span><span>0 hops</span></div>
+      </div>
+    </div>
+
+    <div id="f-caption" class="caption">No dependency traversal. <b>Instant</b> — when names line up.</div>
+  </section>
+
+  <section class="scene modesc" id="mod-smart">
+    <div class="mode-head">
+      <div id="s-badge" class="mode-badge">smart</div>
+      <div id="s-head-meta" class="meta">
+        <div class="mm-line">Mode 2 of 3 · balanced — default</div>
+        <div class="mm-title">It follows your imports.</div>
+      </div>
+    </div>
+
+    <div class="console">
+      <div id="s-line1" class="c-cmd">$ npx mo3ta-coverage <span class="flag">--mode smart</span><span id="s-caret" class="caret"></span></div>
+      <div id="s-out" class="c-out"><span class="ok">✓</span> walking import graph from src/utils/helper.js</div>
+    </div>
+
+    <div class="graph-row">
+      <div id="sn-src" class="node">
+        <div class="node-label">Changed source</div>
+        <div class="node-file">src/utils/helper.js</div>
+        <div class="node-meta"><span class="tag changed">MODIFIED</span><span>3 lines</span></div>
+      </div>
+
+      <div id="slink1" class="link-zone">
+        <div class="link-label">depth 1</div>
+        <span class="link-line"></span>
+      </div>
+
+      <div id="sn-mid" class="node">
+        <div class="node-label">Barrel / re-export</div>
+        <div class="node-file">src/utils/index.js</div>
+        <div class="node-meta"><span class="tag hop">1 HOP</span><span>imports helper</span></div>
+      </div>
+
+      <div id="slink2" class="link-zone second">
+        <div class="link-label">depth 2</div>
+        <span class="link-line"></span>
+      </div>
+
+      <div id="sn-spec" class="node">
+        <div class="node-label">Related spec</div>
+        <div class="node-file">specs/custom-name.spec.js</div>
+        <div class="node-meta"><span class="tag matched">MATCHED</span><span>different name</span></div>
+      </div>
+    </div>
+
+    <div id="s-out2" class="c-out" style="margin-top:34px;font-family:var(--mono);font-size:22px;color:var(--muted)"><span style="color:var(--pass)">✓</span> 1 related test file · found through barrel · 4.1s</div>
+    <div id="s-caption" class="caption">Names don't match. <b>The import graph does.</b></div>
+  </section>
+
+  <section class="scene modesc" id="mod-full">
+    <div class="mode-head">
+      <div id="u-badge" class="mode-badge">full</div>
+      <div id="u-head-meta" class="meta">
+        <div class="mm-line">Mode 3 of 3 · broadest</div>
+        <div class="mm-title">Let Jest do the hunting.</div>
+      </div>
+    </div>
+
+    <div class="console">
+      <div id="u-line1" class="c-cmd">$ npx mo3ta-coverage <span class="flag">--mode full</span><span id="u-caret" class="caret"></span></div>
+      <div id="u-line2" class="c-out">→ jest --findRelatedTests src/utils/helper.js</div>
+      <div id="u-line3" class="c-out">  resolving every import · no depth limit</div>
+      <div id="u-out" class="c-out"><span class="ok">✓</span> 7 related test files found · 11.2s</div>
+    </div>
+
+    <div class="filelist">
+      <div class="fl-label">related test files</div>
+      <div id="u-rows">
+        <div class="fl-row"><span class="fl-yes">✓</span><span class="fl-file">src/utils/helper.test.js</span><span class="fl-dim">— name match</span></div>
+        <div class="fl-row"><span class="fl-yes">✓</span><span class="fl-file">src/utils/service.test.js</span><span class="fl-dim">— direct import</span></div>
+        <div class="fl-row"><span class="fl-yes">✓</span><span class="fl-file">src/components/widget.test.js</span><span class="fl-dim">— via barrel</span></div>
+        <div class="fl-row"><span class="fl-yes">✓</span><span class="fl-file">specs/edgecases.spec.js</span><span class="fl-dim">— 3 hops deep</span></div>
+      </div>
+    </div>
+
+    <div id="u-caption" class="caption">Everything Jest considers related. <b>Zero guesses.</b></div>
+  </section>
+
+  <section class="scene" id="end">
+    <div id="e-word" class="end-wordmark">mo3ta<span class="accent">-coverage</span></div>
+    <div id="e-cmd" class="end-cmd"><span>npx mo3ta-coverage</span><span class="flag">--mode smart</span></div>
+    <div id="e-modes" class="end-modes"><b class="w">fast</b> · <b class="a">smart</b> (default) · <b class="g">full</b></div>
+    <div id="e-note" class="end-note">changed-line coverage after git diff</div>
+  </section>
+
+  <div class="vignette"></div>
+</section>
+</div>
+<script>
+  window.__timelines = window.__timelines || {};
+
+  (function () {
+    const tl = gsap.timeline({ paused: true });
+
+    // SLOW TRANSITIONS: every scene exit 0.9s, enter 0.9s, crosshanded in 0.4s.
+
+    // ---------- 0.0-4.3 hook ----------
+    tl.fromTo("#h-pill", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8, ease: "power3.out" }, 0.15);
+    tl.fromTo("#h-title", { y: 24, scale: 0.985, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.9, ease: "power3.out" }, 0.3);
+    tl.fromTo("#h-tag", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8, ease: "power3.out" }, 0.6);
+    tl.fromTo("#h-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.9, ease: "power2.inOut" }, 0.85);
+    tl.to("#hook", { opacity: 0, y: -26, duration: 0.9, ease: "power2.in" }, 3.4);
+
+    // ---------- 3.7-10.1 problem ----------
+    tl.fromTo("#problem", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.9, ease: "power2.out" }, 3.7);
+    tl.fromTo("#p-kicker", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 4.0);
+    tl.fromTo("#p-title", { y: 22, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, ease: "power3.out" }, 4.2);
+    tl.fromTo("#diff-panel", { y: 28, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, ease: "power3.out" }, 4.6);
+    tl.fromTo(".diff-line", { x: -16, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, stagger: 0.14, ease: "power2.out" }, 5.0);
+    tl.fromTo("#diff-foot", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power2.out" }, 5.7);
+    tl.fromTo("#suite-panel", { y: 28, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, ease: "power3.out" }, 5.1);
+    tl.fromTo("#suite-fill", { scaleX: 0 }, { scaleX: 1, duration: 1.4, ease: "power2.out" }, 5.6);
+    tl.fromTo("#p-note", { y: 14, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 6.5);
+    tl.to("#problem", { opacity: 0, y: -22, duration: 0.9, ease: "power2.in" }, 9.2);
+
+    // ---------- 9.6-20.1 MODE 1: FAST ----------
+    tl.fromTo("#mod-fast", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.9, ease: "power2.out" }, 9.6);
+    tl.fromTo("#f-badge", { y: 22, opacity: 0, scale: 0.96 }, { y: 0, opacity: 1, scale: 1, duration: 0.7, ease: "back.out(1.6)" }, 9.9);
+    tl.fromTo("#f-head-meta", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 10.15);
+    tl.fromTo("#f-line1", { x: -20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 10.6);
+    tl.fromTo("#f-caret", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 11.25);
+    tl.fromTo("#f-out", { x: -20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 11.5);
+    tl.fromTo("#f-out2", { x: -20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 12.0);
+    tl.fromTo("#f-nodes", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 12.5);
+    tl.fromTo("#fn-src", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 12.6);
+    tl.fromTo("#fn-spec", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 13.3);
+    tl.fromTo("#f-link .link-line", { scaleX: 0 }, { scaleX: 1, duration: 0.7, ease: "power2.inOut" }, 14.0);
+    tl.fromTo("#f-caption", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, ease: "power3.out" }, 14.9);
+    tl.to("#mod-fast", { opacity: 0, y: -22, duration: 0.9, ease: "power2.in" }, 19.2);
+
+    // ---------- 19.5-32.0 MODE 2: SMART ----------
+    tl.fromTo("#mod-smart", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.9, ease: "power2.out" }, 19.5);
+    tl.fromTo("#s-badge", { y: 22, opacity: 0, scale: 0.96 }, { y: 0, opacity: 1, scale: 1, duration: 0.7, ease: "back.out(1.6)" }, 19.8);
+    tl.fromTo("#s-head-meta", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 20.05);
+    tl.fromTo("#s-line1", { x: -20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 20.5);
+    tl.fromTo("#s-caret", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 21.15);
+    tl.fromTo("#s-out", { x: -20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 21.4);
+    tl.fromTo("#sn-src", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 22.2);
+    tl.fromTo("#slink1 .link-line", { scaleX: 0 }, { scaleX: 1, duration: 0.7, ease: "power2.inOut" }, 22.9);
+    tl.fromTo("#slink1 .link-label", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 23.2);
+    tl.fromTo("#sn-mid", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 23.5);
+    tl.fromTo("#slink2 .link-line", { scaleX: 0 }, { scaleX: 1, duration: 0.7, ease: "power2.inOut" }, 24.3);
+    tl.fromTo("#slink2 .link-label", { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 24.6);
+    tl.fromTo("#sn-spec", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 25.0);
+    tl.fromTo("#s-out2", { x: -20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 25.9);
+    tl.fromTo("#s-caption", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, ease: "power3.out" }, 27.1);
+    tl.to("#mod-smart", { opacity: 0, y: -22, duration: 0.9, ease: "power2.in" }, 31.1);
+
+    // ---------- 31.4-42.9 MODE 3: FULL ----------
+    tl.fromTo("#mod-full", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.9, ease: "power2.out" }, 31.4);
+    tl.fromTo("#u-badge", { y: 22, opacity: 0, scale: 0.96 }, { y: 0, opacity: 1, scale: 1, duration: 0.7, ease: "back.out(1.6)" }, 31.7);
+    tl.fromTo("#u-head-meta", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 31.95);
+    tl.fromTo("#u-line1", { x: -20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 32.4);
+    tl.fromTo("#u-caret", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 32.95);
+    tl.fromTo("#u-line2", { x: -20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 33.1);
+    tl.fromTo("#u-line3", { x: -20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 33.65);
+    tl.fromTo("#u-out", { x: -20, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 34.1);
+    tl.fromTo("#u-rows .fl-row", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.55, stagger: 0.32, ease: "power3.out" }, 34.8);
+    tl.fromTo("#u-caption", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, ease: "power3.out" }, 39.2);
+    tl.to("#mod-full", { opacity: 0, y: -22, duration: 0.9, ease: "power2.in" }, 42.0);
+
+    // ---------- 42.1-45.0 end ----------
+    tl.fromTo("#end", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.9, ease: "power2.out" }, 42.1);
+    tl.fromTo("#e-word", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8, ease: "power3.out" }, 42.35);
+    tl.fromTo("#e-cmd", { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, ease: "power3.out" }, 42.75);
+    tl.fromTo("#e-modes", { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out" }, 43.15);
+    tl.fromTo("#e-note", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power2.out" }, 43.5);
+
+    window.__timelines["mo3ta-modes-45s"] = tl;
+  })();
+</script>
+</body>
+</html>

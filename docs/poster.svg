@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">mo3ta-coverage — modes and features</title>
+  <desc id="desc">Poster listing the fast, smart, and full execution modes and the main features of mo3ta-coverage.</desc>
+
+  <defs>
+    <linearGradient id="bgGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#10131a"/>
+      <stop offset="100%" stop-color="#0f1115"/>
+    </linearGradient>
+    <radialGradient id="topGlow" cx="50%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#60a5fa" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="greenGlow" cx="100%" cy="100%" r="60%">
+      <stop offset="0%" stop-color="#22c55e" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="52" height="52" patternUnits="userSpaceOnUse">
+      <path d="M52 0H0V52" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+    <style>
+      .sans { font-family: Inter, -apple-system, "Helvetica Neue", Arial, sans-serif; }
+      .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+      .muted { fill: #9aa0a6; }
+      .bright { fill: #f4f7fb; }
+      .accent { fill: #60a5fa; }
+    </style>
+  </defs>
+
+  <!-- background -->
+  <rect width="1600" height="900" fill="url(#bgGlow)"/>
+  <rect width="1600" height="900" fill="url(#grid)"/>
+  <rect width="1600" height="900" fill="url(#topGlow)"/>
+  <rect width="1600" height="900" fill="url(#greenGlow)"/>
+
+  <!-- header -->
+  <g class="sans">
+    <g transform="translate(72, 78)">
+      <rect x="0" y="-26" width="286" height="46" rx="23" fill="#60a5fa" fill-opacity="0.09" stroke="#60a5fa" stroke-opacity="0.42"/>
+      <circle cx="28" cy="-3" r="5" fill="#22c55e"/>
+      <text x="46" y="4" class="mono" font-size="15" letter-spacing="3.2" fill="#60a5fa">PR COVERAGE · SMART MODE</text>
+    </g>
+
+    <text x="72" y="188" class="bright" font-size="76" font-weight="800" letter-spacing="-3.2">mo3ta-coverage</text>
+    <text x="74" y="238" class="muted" font-size="28" letter-spacing="-0.4">Changed code. Related specs. Real coverage.</text>
+  </g>
+
+  <!-- modes -->
+  <g class="sans">
+    <text x="72" y="308" class="mono" font-size="15" letter-spacing="3.4" fill="#60a5fa">MODES</text>
+
+    <!-- fast -->
+    <g filter="url(#cardShadow)">
+      <rect x="72" y="330" width="460" height="196" rx="18" fill="#1a1c22" stroke="#2a2d35"/>
+    </g>
+    <text x="102" y="382" class="mono" font-size="15" letter-spacing="2.4" fill="#38bdf8">FAST</text>
+    <text x="102" y="425" class="bright" font-size="26" font-weight="700">Direct mapped tests</text>
+    <text x="102" y="461" class="muted" font-size="18">Naming convention + direct import scan.</text>
+    <text x="102" y="489" class="muted" font-size="18">No dependency traversal.</text>
+    <text x="102" y="518" class="mono" font-size="15" fill="#7dd3fc">--mode fast</text>
+
+    <!-- smart -->
+    <g filter="url(#cardShadow)">
+      <rect x="562" y="330" width="460" height="196" rx="18" fill="#1a1c22" stroke="#60a5fa" stroke-opacity="0.85"/>
+    </g>
+    <rect x="878" y="352" width="118" height="30" rx="15" fill="#60a5fa" fill-opacity="0.14" stroke="#60a5fa" stroke-opacity="0.45"/>
+    <text x="895" y="372" class="mono" font-size="12" letter-spacing="1.6" fill="#60a5fa">DEFAULT</text>
+    <text x="592" y="382" class="mono" font-size="15" letter-spacing="2.4" fill="#60a5fa">SMART</text>
+    <text x="592" y="425" class="bright" font-size="26" font-weight="700">Naming + reverse imports</text>
+    <text x="592" y="461" class="muted" font-size="18">Finds specs through barrels and wrappers.</text>
+    <text x="592" y="489" class="muted" font-size="18">Depth-limited by --depth (default 2).</text>
+    <text x="592" y="518" class="mono" font-size="15" fill="#93c5fd">--mode smart --depth 2</text>
+
+    <!-- full -->
+    <g filter="url(#cardShadow)">
+      <rect x="1052" y="330" width="460" height="196" rx="18" fill="#1a1c22" stroke="#2a2d35"/>
+    </g>
+    <text x="1082" y="382" class="mono" font-size="15" letter-spacing="2.4" fill="#a78bfa">FULL</text>
+    <text x="1082" y="425" class="bright" font-size="26" font-weight="700">Jest finds related tests</text>
+    <text x="1082" y="461" class="muted" font-size="18">Passes changed files to Jest directly.</text>
+    <text x="1082" y="489" class="muted" font-size="18">Unbounded --findRelatedTests walk.</text>
+    <text x="1082" y="518" class="mono" font-size="15" fill="#c4b5fd">--mode full</text>
+  </g>
+
+  <!-- features -->
+  <g class="sans">
+    <text x="72" y="598" class="mono" font-size="15" letter-spacing="3.4" fill="#60a5fa">FEATURES</text>
+
+    <!-- column 1 -->
+    <g transform="translate(72, 638)">
+      <circle cx="6" cy="-6" r="4" fill="#22c55e"/>
+      <text x="26" y="0" font-size="21" class="bright">Detects changed JS/TS files for all authors</text>
+
+      <circle cx="6" cy="42" r="4" fill="#22c55e"/>
+      <text x="26" y="48" font-size="21" class="bright">Runs only the tests related to the change</text>
+
+      <circle cx="6" cy="90" r="4" fill="#22c55e"/>
+      <text x="26" y="96" font-size="21" class="bright">Maps specs by name and by import graph</text>
+
+      <circle cx="6" cy="138" r="4" fill="#22c55e"/>
+      <text x="26" y="144" font-size="21" class="bright">Scans selected files with --files</text>
+    </g>
+
+    <!-- column 2 -->
+    <g transform="translate(876, 638)">
+      <circle cx="6" cy="-6" r="4" fill="#22c55e"/>
+      <text x="26" y="0" font-size="21" class="bright">Checks changed-line coverage from lcov.info</text>
+
+      <circle cx="6" cy="42" r="4" fill="#22c55e"/>
+      <text x="26" y="48" font-size="21" class="bright">Fails below the --limit threshold</text>
+
+      <circle cx="6" cy="90" r="4" fill="#22c55e"/>
+      <text x="26" y="96" font-size="21" class="bright">Reports every uncovered changed line</text>
+
+      <circle cx="6" cy="138" r="4" fill="#22c55e"/>
+      <text x="26" y="144" font-size="21" class="bright">Works locally and in CI</text>
+    </g>
+  </g>
+
+  <!-- footer command -->
+  <rect x="72" y="790" width="1456" height="62" rx="14" fill="#14161c" stroke="#2a2d35"/>
+  <text x="102" y="829" class="mono" font-size="19" fill="#9aa0a6">$</text>
+  <text x="124" y="829" class="mono" font-size="19" fill="#e6e6e6">npx mo3ta-coverage</text>
+  <text x="334" y="829" class="mono" font-size="19" fill="#60a5fa">--mode smart</text>
+  <text x="482" y="829" class="mono" font-size="19" fill="#9aa0a6">--base origin/main</text>
+  <text x="706" y="829" class="mono" font-size="19" fill="#9aa0a6">--limit 80</text>
+  <text x="1476" y="829" class="mono" font-size="14" fill="#22c55e" text-anchor="end">changed lines only</text>
+</svg>

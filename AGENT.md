@@ -57,7 +57,8 @@ There is no lint/typecheck/format script. `npm run build` currently outputs
 index.js
   └─ main(options)                         src/cli.js
        ├─ verifyGitRepoExists()            src/gitUtils.js
-       ├─ getChangedFiles(base)            git log/diff/diff --cached, sort -u
+       ├─ getExplicitFiles(options)        --files / --filesFrom, or
+       ├─ getChangedFiles(base)            merge-base diff + working tree, all authors
        ├─ runRelatedTests(files, mode, depth)
        │    └─ npx jest ... --coverage
        └─ reportUncoveredChangedLines(...)
@@ -71,13 +72,17 @@ index.js
 
 `getChangedFiles()` unions:
 
-- files from commits authored by the current git user between
-  `merge-base HEAD <base>` and `HEAD`,
+- files changed between `merge-base HEAD <base>` and `HEAD` (all authors),
 - unstaged changes,
 - staged changes.
 
 It keeps only `.js/.ts/.jsx/.tsx` and drops `node_modules`, `coverage`, `dist`,
 `build`, and `.git` paths. Paths are relative to `process.cwd()`.
+
+When `--files` or `--filesFrom` is provided, `getExplicitFiles()` normalizes the
+list (comma/space separated, relative or absolute, de-duplicated) and auto
+detection is skipped. Changed lines for those files are still computed against
+`--base`, because `git diff -U0 <base> -- <file>` drives the coverage check.
 
 ### Modes
 

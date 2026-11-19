@@ -36,6 +36,8 @@ program
   .option('--showCovered <bool>', 'Show covered changed lines in the output', false)
   .option('--mode <mode>', 'Execution mode: fast, smart, or full', 'smart')
   .option('--depth <number>', 'Smart mode max reverse-dependency depth (1 = direct importers, 2 = also importers of importers)', '2')
+  .option('--files <files...>', 'Scan only these files instead of detecting changed files (space- or comma-separated)')
+  .option('--filesFrom <path>', 'Read the list of files to scan from a newline-separated file')
   .enablePositionalOptions(); // used to allow using same options in subcommands
 
 
