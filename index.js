@@ -25,8 +25,12 @@ function writeConfig(config) {
 
 const program = new Command();
 
+const PkgPath = new URL('./package.json', import.meta.url);
+const pkgVersion = JSON.parse(fs.readFileSync(PkgPath, 'utf8')).version;
+
 program
   .name('mo3ta-coverage')
+  .version(pkgVersion, '-V, --version', 'Show the installed version')
   .description('Run tests and report uncovered changed lines in a PR. Checks cumulative coverage for all changed lines against a specified limit. Useful for CI and code review workflows.');
 
 program
@@ -39,6 +43,24 @@ program
   .option('--files <files...>', 'Scan only these files instead of detecting changed files (space- or comma-separated)')
   .option('--filesFrom <path>', 'Read the list of files to scan from a newline-separated file')
   .enablePositionalOptions(); // used to allow using same options in subcommands
+
+// Usage help text (printed next to --help)
+program.showHelpAfterError('(add --help for a list of options)');
+program.addHelpText('after', `
+Examples:
+$ mo3ta-coverage --mode smart --base origin/main --limit 80
+$ mo3ta-coverage --files src/a.js,src/b.ts --base origin/main
+$ mo3ta-coverage --filesFrom changed.txt --base origin/main
+$ mo3ta-coverage --mode fast --showCovered true
+$ mo3ta-coverage config --mode smart --depth 2
+$ mo3ta-coverage --version
+
+Modes:
+  fast   Naming-convention matches, plus a direct import-scan fallback.
+  smart  Naming + reverse-import walk, bounded by --depth (default 2).
+  full   Passes changed files to "jest --findRelatedTests".
+
+See README.md for details: https://github.com/MahmoudMabrok/mo3ta-coverage`);
 
 
 program
