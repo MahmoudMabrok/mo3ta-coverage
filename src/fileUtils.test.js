@@ -1,4 +1,10 @@
-import { getJsOnlyFiles, separateSourceAndTestFiles, findTestFilesForSource, findTestFilesByImport } from './fileUtils';
+import {
+    getJsOnlyFiles,
+    separateSourceAndTestFiles,
+    findTestFilesForSource,
+    findTestFilesByImport,
+    findRelatedTestFilesBySource
+} from './fileUtils';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -317,5 +323,96 @@ describe('findTestFilesByImport', () => {
         const result = findTestFilesByImport('src/utils/helper.js', root);
 
         expect(result).toEqual(['src/real.test.js']);
+    });
+});
+
+describe('findRelatedTestFilesBySource', () => {
+    let tempDir;
+
+    function createFixture(structure) {
+        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mo3ta-related-'));
+        Object.entries(structure).forEach(([filePath, content]) => {
+            const absolutePath = path.join(tempDir, filePath);
+            fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+            fs.writeFileSync(absolutePath, content);
+        });
+        return tempDir;
+    }
+
+    afterEach(() => {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('includes same-name test files and differently named importer specs', () => {
+        const root = createFixture({
+            'src/widget.js': 'export const widget = 1;',
+            'src/widget.test.js': "import { widget } from './widget';\n",
+            'src/integration.spec.js': "import { widget } from './widget';\n"
+        });
+
+        const result = findRelatedTestFilesBySource('src/widget.js', { root });
+
+        expect(result).toEqual(['src/integration.spec.js', 'src/widget.test.js']);
+    });
+
+    it('finds a direct importer at depth 1', () => {
+        const root = createFixture({
+            'lib/helper.js': 'export const add = (a, b) => a + b;',
+            'lib/custom-name.spec.js': "import { add } from './helper';\n"
+        });
+
+        const result = findRelatedTestFilesBySource('lib/helper.js', { root, maxDepth: 1 });
+
+        expect(result).toEqual(['lib/custom-name.spec.js']);
+    });
+
+    it('finds a spec that reaches the source through one intermediate module at depth 2', () => {
+        const root = createFixture({
+            'lib/helper.js': 'export const add = (a, b) => a + b;',
+            'lib/service.js': "import { add } from './helper';\nexport const run = () => add(1, 2);\n",
+            'lib/feature.spec.js': "import { run } from './service';\n"
+        });
+
+        const depthOne = findRelatedTestFilesBySource('lib/helper.js', { root, maxDepth: 1 });
+        const depthTwo = findRelatedTestFilesBySource('lib/helper.js', { root, maxDepth: 2 });
+
+        expect(depthOne).toEqual([]);
+        expect(depthTwo).toEqual(['lib/feature.spec.js']);
+    });
+
+    it('finds specs that import the source through a barrel index', () => {
+        const root = createFixture({
+            'src/utils/helper.js': 'export const add = (a, b) => a + b;',
+            'src/utils/index.js': "export * from './helper';\n",
+            'src/app.test.js': "import { add } from './utils';\n"
+        });
+
+        const result = findRelatedTestFilesBySource('src/utils/helper.js', { root, maxDepth: 2 });
+
+        expect(result).toEqual(['src/app.test.js']);
+    });
+
+    it('resolves alias imports while walking the graph', () => {
+        const root = createFixture({
+            'src/utils/helper.js': 'export const add = (a, b) => a + b;',
+            'src/services/user.js': "import { add } from '@/utils/helper';\nexport const total = () => add(1, 1);\n",
+            'src/user.spec.js': "import { total } from './services/user';\n"
+        });
+
+        const result = findRelatedTestFilesBySource('src/utils/helper.js', { root, maxDepth: 2 });
+
+        expect(result).toEqual(['src/user.spec.js']);
+    });
+
+    it('does not return unrelated test files', () => {
+        const root = createFixture({
+            'src/utils/helper.js': 'export const add = (a, b) => a + b;',
+            'src/unrelated.test.js': "import { other } from './other';\n",
+            'src/other.js': 'export const other = 1;'
+        });
+
+        const result = findRelatedTestFilesBySource('src/utils/helper.js', { root, maxDepth: 2 });
+
+        expect(result).toEqual([]);
     });
 });

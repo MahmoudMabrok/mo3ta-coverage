@@ -35,6 +35,7 @@ program
   .option('--limit <percent>', 'Minimum required coverage percentage for all changed lines (e.g., 80)', '80')
   .option('--showCovered <bool>', 'Show covered changed lines in the output', false)
   .option('--mode <mode>', 'Execution mode: fast, smart, or full', 'smart')
+  .option('--depth <number>', 'Smart mode max reverse-dependency depth (1 = direct importers, 2 = also importers of importers)', '2')
   .enablePositionalOptions(); // used to allow using same options in subcommands
 
 
@@ -43,6 +44,7 @@ program
   .description('Set or get configuration options')
   .option('--base <branch>', 'Set default base branch')
   .option('--mode <mode>', 'Set default mode (fast/smart/full)')
+  .option('--depth <number>', 'Set default smart-mode depth (1-10)')
   .action((opts) => {
     let config = readConfig();
 
@@ -66,6 +68,17 @@ program
       updated = true;
       console.log(`Default mode set to: ${config.mode}`);
     }
+
+    if (opts.depth !== undefined) {
+      const normalizedDepth = Number.parseInt(opts.depth, 10);
+      if (!Number.isInteger(normalizedDepth) || normalizedDepth < 1 || normalizedDepth > 10) {
+        console.error(`Invalid depth: ${opts.depth}. Expected an integer between 1 and 10.`);
+        process.exit(1);
+      }
+      config.depth = normalizedDepth;
+      updated = true;
+      console.log(`Default smart-mode depth set to: ${config.depth}`);
+    }
     if (updated) {
       writeConfig(config);
     } else {
@@ -79,6 +92,9 @@ program
 program.action((opts) => {
   const config = readConfig();
   const options = program.opts();
+
+  const modeFromCli = program.getOptionValueSource('mode') === 'cli';
+  const depthFromCli = program.getOptionValueSource('depth') === 'cli';
  
   // Use config base if not provided in CLI
   if (!options.base && config.base) {
@@ -87,7 +103,7 @@ program.action((opts) => {
     options.base = 'origin/main';
   }
 
-  if (!options.mode && config.mode) {
+  if (!modeFromCli && config.mode) {
     options.mode = config.mode;
   }
 
@@ -95,6 +111,19 @@ program.action((opts) => {
   if (!['fast', 'smart', 'full'].includes(options.mode)) {
     console.error(`Invalid mode: ${options.mode}. Expected one of: fast, smart, full.`);
     process.exit(1);
+  }
+
+  if (options.mode === 'smart') {
+    if (!depthFromCli && config.depth !== undefined) {
+      options.depth = String(config.depth);
+    }
+
+    const depth = Number.parseInt(options.depth, 10);
+    if (!Number.isInteger(depth) || depth < 1 || depth > 10) {
+      console.error(`Invalid depth: ${options.depth}. Expected an integer between 1 and 10.`);
+      process.exit(1);
+    }
+    options.depth = depth;
   }
 
   console.log(`Final options: ${JSON.stringify(options, null, 2)}`);

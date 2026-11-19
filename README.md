@@ -5,8 +5,9 @@ mo3ta-coverage checks coverage for changed lines in a pull request. It finds cha
 ## Features
 
 - Detects changed JS/TS files from git history and working tree
-- Maps changed source files to nearby test files automatically
+- Maps changed source files to related test files, even when names differ
 - Supports three execution modes: `fast`, `smart`, and `full`
+- Walks reverse imports in `smart` mode to a configurable depth (default `2`)
 - Parses `lcov.info` and reports uncovered changed lines
 - Enforces a minimum coverage threshold for changed lines
 
@@ -31,12 +32,23 @@ mo3ta-coverage --mode smart --base origin/main --limit 80
 | `--limit <percent>` | Minimum changed-line coverage percentage | `80` |
 | `--showCovered <bool>` | Show covered changed lines in output | `false` |
 | `--mode <mode>` | Execution mode: `fast`, `smart`, or `full` | `smart` |
+| `--depth <number>` | Max reverse-import depth used by `smart` (`1` or `2` recommended) | `2` |
 
 ## Modes
 
-- `fast`: Direct execution of mapped test files only. No Jest dependency traversal.
-- `smart`: Direct execution of changed test files only. It does not expand to mapped or imported test files, and performs no Jest dependency traversal.
-- `full`: Runs mapped test files through `jest --findRelatedTests`.
+- `fast`: Naming-convention matches only, plus a direct import-scan fallback. No dependency traversal.
+- `smart`: Naming-convention matches plus a reverse-import walk from each changed file, limited by `--depth`. This finds spec files whose names differ and tests that reach the changed file through intermediate modules such as barrel `index.js` files. No Jest dependency traversal.
+- `full`: Passes the changed source and test files to `jest --findRelatedTests`, letting Jest traverse without a depth limit.
+
+### Depth in `smart` mode
+
+One depth step is one import edge:
+
+- `--depth 1`: test files that import the changed file directly.
+- `--depth 2` (default): also test files that import a module which imports the changed file.
+
+Depth `2` is usually the sweet spot: it catches barrel/re-export and thin wrapper
+layers without pulling in the whole dependency graph.
 
 ## Recommended Mode
 
@@ -53,7 +65,7 @@ Use `full` only when you intentionally want Jest to expand to related tests.
 You can persist defaults with the `config` subcommand:
 
 ```sh
-mo3ta-coverage config --base origin/main --mode smart
+mo3ta-coverage config --base origin/main --mode smart --depth 2
 ```
 
 This writes `.mo3ta-coverage.json` in the project root.
@@ -62,7 +74,9 @@ This writes `.mo3ta-coverage.json` in the project root.
 
 1. Reads CLI options and saved config from [index.js](index.js).
 2. Finds changed source files from git in [src/cli.js](src/cli.js).
-3. Maps source files to nearby test files in [src/fileUtils.js](src/fileUtils.js).
+3. Maps source files to related test files in [src/fileUtils.js](src/fileUtils.js).
+   `smart` mode combines naming conventions with a cached reverse-import index
+   and walks it up to `--depth` edges.
 4. Runs Jest in the selected mode from [src/cli.js](src/cli.js).
 5. Parses `lcov.info` and reports uncovered changed lines.
 

@@ -3,7 +3,13 @@ import fs from 'fs';
 import path from 'path';
 import { exit } from 'process';
 import { verifyBaseBranchExists, verifyGitRepoExists } from './gitUtils.js';
-import { getJsOnlyFiles, separateSourceAndTestFiles, findTestFilesForSource, findTestFilesByImport } from './fileUtils.js';
+import {
+  getJsOnlyFiles,
+  separateSourceAndTestFiles,
+  findTestFilesForSource,
+  findTestFilesByImport,
+  findRelatedTestFilesBySource
+} from './fileUtils.js';
 
 export function main(options) {
   try {
@@ -15,11 +21,12 @@ export function main(options) {
     const COVERAGE_LIMIT = parseFloat(options.limit);
     const SHOW_COVERED = options.showCovered === true || options.showCovered === 'true';
     const MODE = options.mode;
+    const DEPTH = Number.parseInt(options.depth, 10) || 2;
 
-    console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE}`);
+    console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE} \nDepth: ${DEPTH}`);
 
     const changedFiles = getChangedFiles(BASE_BRANCH);
-    runRelatedTests(changedFiles, MODE);
+    runRelatedTests(changedFiles, MODE, DEPTH);
     reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED);
   } catch (error) {
     console.error('❌ An unexpected error occurred:', error.message || error);
@@ -53,15 +60,18 @@ function getChangedFiles(BASE_BRANCH) {
   }
 }
 
-export function selectTestFilesForMode(mode, changedTestFiles, mappedTestFiles) {
-  if (mode === 'smart') {
-    return changedTestFiles;
-  }
+function runJest(command) {
+  console.log(`   Jest command: ${command}`);
 
-  return mappedTestFiles;
+  try {
+    execSync(command, { stdio: 'inherit' });
+  } catch (err) {
+    console.error('❌ Tests failed:', err.message || err);
+    exit(1);
+  }
 }
 
-function runRelatedTests(files, mode) {
+function runRelatedTests(files, mode, depth = 2) {
   if (files.length === 0) {
     console.log('✅ No changed source files found.');
     exit(0);
@@ -84,32 +94,51 @@ function runRelatedTests(files, mode) {
     testFiles.forEach(file => console.log(`     - ${file}`));
   }
 
-  // Find test files for changed source files
+  // Full mode delegates discovery to Jest, so pass the changed files themselves.
+  if (mode === 'full') {
+    const jestTargets = [...sourceFiles, ...testFiles];
+
+    if (jestTargets.length === 0) {
+      console.log('\n⚠️  No changed source or test files found to run.');
+      exit(0);
+    }
+
+    console.log(`\n📝 Test strategy: full (Jest --findRelatedTests, unbounded traversal)`);
+    console.log(`   Running tests related to ${sourceFiles.length} source file(s) + ${testFiles.length} changed test(s)`);
+    console.log(`   ⚠️  If this expands to too many tests, switch to --mode smart`);
+    console.log('   Files passed to Jest:');
+    jestTargets.forEach(file => console.log(`     - ${file}`));
+
+    runJest(`npx jest --findRelatedTests --passWithNoTests --coverage ${jestTargets.join(' ')}`);
+    return;
+  }
+
+  // Fast: naming-convention mapping with a direct-import fallback.
+  // Smart: naming-convention mapping plus a depth-limited reverse-dependency walk.
   const testFilesToRun = new Set(testFiles);
-  const mappedTests = new Map(); // Track which tests map to which source files
 
   sourceFiles.forEach(sourceFile => {
-    let relatedTests = findTestFilesForSource(sourceFile);
-    let matchType = 'naming convention';
+    let relatedTests;
+    let matchType;
 
-    // Fallback: spec files don't have to follow the same-name convention.
-    // If no name-based test file exists, look for test files that import this source file.
-    if (relatedTests.length === 0) {
-      relatedTests = findTestFilesByImport(sourceFile);
-      if (relatedTests.length > 0) {
-        matchType = 'import scan';
+    if (mode === 'smart') {
+      relatedTests = findRelatedTestFilesBySource(sourceFile, { maxDepth: depth });
+      matchType = `naming + import graph, depth ≤ ${depth}`;
+    } else {
+      relatedTests = findTestFilesForSource(sourceFile);
+      matchType = 'naming convention';
+
+      if (relatedTests.length === 0) {
+        relatedTests = findTestFilesByImport(sourceFile);
+        if (relatedTests.length > 0) {
+          matchType = 'import scan';
+        }
       }
     }
 
     if (relatedTests.length > 0) {
       console.log(`   ✓ ${sourceFile} → ${relatedTests.length} test file(s) (${matchType})`);
-      relatedTests.forEach(test => {
-        testFilesToRun.add(test);
-        if (!mappedTests.has(test)) {
-          mappedTests.set(test, []);
-        }
-        mappedTests.get(test).push(sourceFile);
-      });
+      relatedTests.forEach(test => testFilesToRun.add(test));
     } else {
       console.log(`   ⚠ ${sourceFile} → No test file found`);
     }
@@ -124,65 +153,20 @@ function runRelatedTests(files, mode) {
   }
 
   console.log(`\n🧪 Running ${finalTestFiles.length} test file(s):\n`, finalTestFiles.join('\n'));
+  console.log('   Files passed to Jest:');
+  finalTestFiles.forEach(file => console.log(`     - ${file}`));
 
-  if (mode === 'fast') {
+  if (mode === 'smart') {
+    console.log(`\n📝 Test strategy: smart (naming + reverse imports, depth ≤ ${depth})`);
+    console.log(`   Test files: ${finalTestFiles.length}`);
+    console.log(`   Source files for coverage: ${sourceFiles.length}`);
+  } else {
     console.log(`\n📝 Test strategy: fast (Direct execution, no Jest dependency traversal)`);
     console.log(`   Test files: ${finalTestFiles.length}`);
     console.log(`   Source files detected: ${sourceFiles.length}`);
-    console.log('   Files passed to Jest:');
-    finalTestFiles.forEach(file => console.log(`     - ${file}`));
-    const command = `npx jest --passWithNoTests --coverage ${finalTestFiles.join(' ')}`;
-    console.log(`   Jest command: ${command}`);
-
-    try {
-      execSync(command, { stdio: 'inherit' });
-    } catch (err) {
-      console.error('❌ Tests failed:', err.message || err);
-      exit(1);
-    }
-  } else if (mode === 'smart') {
-    // Smart mode is intentionally scoped to the changed files in the diff.
-    // Mapped tests can include unchanged files (especially when a source file
-    // is imported by a broad test suite), which makes smart mode unexpectedly
-    // run the whole suite. Only changed test files belong in this mode.
-    const changedTestFiles = selectTestFilesForMode(mode, testFiles, finalTestFiles);
-    if (changedTestFiles.length === 0) {
-      console.log('\n⚠️  No changed test files found to run in smart mode.');
-      console.log('Change a test file or use --mode full to run related tests for changed source files.');
-      exit(0);
-    }
-
-    console.log(`\n📝 Test strategy: smart (Run only changed test files, no Jest dependency traversal)`);
-    console.log(`   Test files: ${changedTestFiles.length}`);
-    console.log(`   Source files for coverage: ${sourceFiles.length}`);
-    console.log('   Files passed to Jest:');
-    changedTestFiles.forEach(file => console.log(`     - ${file}`));
-    const command = `npx jest --passWithNoTests --coverage ${changedTestFiles.join(' ')}`;
-    console.log(`   Jest command: ${command}`);
-
-    try {
-      execSync(command, { stdio: 'inherit' });
-    } catch (err) {
-      console.error('❌ Tests failed:', err.message || err);
-      exit(1);
-    }
-  } else {
-    console.log(`\n📝 Test strategy: full (Run mapped tests through Jest --findRelatedTests)`);
-    console.log(`   Running tests for ${sourceFiles.length} source file(s) + ${testFiles.length} changed test(s)`);
-    console.log(`   Test files in Jest command: ${finalTestFiles.length}`);
-    console.log(`   ⚠️  If this expands to too many tests, switch to --mode smart`);
-    console.log('   Test files passed to Jest:');
-    finalTestFiles.forEach(file => console.log(`     - ${file}`));
-    const command = `npx jest --findRelatedTests --passWithNoTests --coverage ${finalTestFiles.join(' ')}`;
-    console.log(`   Jest command: ${command}`);
-    
-    try {
-      execSync(command, { stdio: 'inherit' });
-    } catch (err) {
-      console.error('❌ Tests failed:', err.message || err);
-      exit(1);
-    }
   }
+
+  runJest(`npx jest --passWithNoTests --coverage ${finalTestFiles.join(' ')}`);
 }
 
 function getChangedLines(filePath, BASE_BRANCH) {

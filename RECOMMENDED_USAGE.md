@@ -10,15 +10,29 @@ mo3ta-coverage --mode smart --base origin/main --limit 80
 
 ## Why `smart`
 
-`smart` avoids Jest dependency traversal by running only test files that are themselves changed in the diff. It never expands to every test file related to a changed source file, which keeps the run predictable for large projects.
+`smart` avoids Jest dependency traversal by running only the related test files directly. It combines naming-convention matches with a depth-limited reverse-import walk: test files that directly import a changed file (`--depth 1`), or that import a module which imports it (`--depth 2`, the default). That catches differently named specs and barrel/re-export layers without pulling in the whole dependency graph, making it the most predictable mode for large projects.
 
 ## Mode Comparison
 
 | Mode | What Jest Receives | Traversal | Typical Outcome |
 |------|--------------------|-----------|-----------------|
-| `fast` | mapped test files | none | fastest run |
-| `smart` | changed test files only | none | predictable changed-file check |
-| `full` | mapped test files via `--findRelatedTests` | yes | can expand widely |
+| `fast` | naming-mapped test files (+ direct import fallback) | none | fastest run |
+| `smart` | related test files (naming + reverse imports, depth ≤ 2) | bounded | best balance |
+| `full` | changed source/test files via `--findRelatedTests` | unbounded | can expand widely |
+
+## Tuning `smart` Depth
+
+```bash
+# Direct importers only
+mo3ta-coverage --mode smart --depth 1
+
+# Direct importers plus one intermediate module (default)
+mo3ta-coverage --mode smart --depth 2
+```
+
+Use `--depth 1` when modules are tested directly. Keep `--depth 2` when the
+codebase uses barrel `index.js` files or thin wrapper modules between a helper
+and its spec.
 
 ## Project Setup
 
@@ -33,7 +47,8 @@ mo3ta-coverage --mode smart --base origin/main --limit 80
 ```json
 {
   "base": "origin/main",
-  "mode": "smart"
+  "mode": "smart",
+  "depth": 2
 }
 ```
 
