@@ -6,7 +6,7 @@ mo3ta-coverage checks coverage for changed lines in a pull request. It finds cha
 
 ## Demo
 
-https://github.com/user-attachments/assets/5241bfa7-ba66-4405-bf42-fd6522be56a6
+https://github.com/user-attachments/assets/1139ca7a-69e6-4b41-ad24-ff20e083c4e0
 
 A quick walkthrough of changed-file detection, related-test selection, and changed-line coverage.
 
