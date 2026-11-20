@@ -106,8 +106,10 @@ function severityRank(severity) {
 
 /**
  * Create the tracking label on first use; `--force` makes it a no-op when
- * the label already exists. Failures (e.g. missing `labels: write`) are
- * swallowed — the label is cosmetic, not required.
+ * the label already exists. Creating labels needs repo write access, which
+ * the workflow token deliberately does not have — the "security" label is
+ * pre-created in the repository, so the workflow only references it.
+ * Failures are swallowed anyway: the label is cosmetic, not required.
  */
 function ensureLabel() {
   try {
@@ -118,6 +120,25 @@ function ensureLabel() {
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Apply the tracking label to a specific issue, best-effort. Adding a label
+ * needs a label-capable token; if that fails we log and move on — the issue
+ * (title + body) is what actually tracks the finding.
+ */
+function applyLabel(number) {
+  try {
+    gh(['issue', 'edit', String(number), '--add-label', ISSUE_LABEL]);
+  } catch (err) {
+    const reason = /Error|error/.test(err.message) ? err.message.split('\n').find(l => l.trim()) : 'unauthorized';
+    console.log(`(skipped "${ISSUE_LABEL}" label on #${number}: ${reason})`);
+  }
+}
+
+function issueNumberFromUrl(url) {
+  const match = String(url).trim().match(/\/issues\/(\d+)/);
+  return match ? match[1] : null;
+}
 
 function main() {
   const auditPath = process.argv[2] || 'audit.json';
@@ -150,19 +171,22 @@ function main() {
 
   const body = buildBody(counts, audit.vulnerabilities, process.env.RUN_URL);
 
+  let number;
   if (existing) {
-    console.log(`Refreshing issue #${existing}`);
-    gh(['issue', 'edit', String(existing), '--title', ISSUE_TITLE, '--body', body, '--add-label', ISSUE_LABEL]);
+    number = existing;
+    console.log(`Refreshing issue #${number}`);
+    gh(['issue', 'edit', String(number), '--title', ISSUE_TITLE, '--body', body]);
   } else {
     console.log('Opening new vulnerability issue');
-    try {
-      gh(['issue', 'create', '--title', ISSUE_TITLE, '--body', body, '--label', ISSUE_LABEL]);
-    } catch {
-      // Label missing/unusable (e.g. no permission to reference it) — the
-      // issue matters more than the label, so retry without it.
-      console.log(`Could not apply "${ISSUE_LABEL}" label — creating issue without it.`);
-      gh(['issue', 'create', '--title', ISSUE_TITLE, '--body', body]);
+    const createdUrl = gh(['issue', 'create', '--title', ISSUE_TITLE, '--body', body]);
+    number = issueNumberFromUrl(createdUrl);
+    if (number) {
+      console.log(`Opened issue #${number}`);
     }
+  }
+
+  if (number) {
+    applyLabel(number);
   }
 }
 
