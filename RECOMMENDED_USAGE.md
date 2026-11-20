@@ -69,6 +69,16 @@ mo3ta-coverage --mode smart --base origin/main --limit 80
   run: npx mo3ta-coverage --mode smart --base origin/main --limit 80
 ```
 
+## Listing Tests For Other Tools
+
+Use `--dryRun true` when another tool needs the same test selection this
+tool would execute. It prints the test files (one path per line) on stdout
+and stops before Jest and the coverage check:
+
+```bash
+mo3ta-coverage --mode smart --base origin/main --dryRun true
+```
+
 ## When To Use `full`
 
 Use `full` only if you explicitly want Jest to discover more tests through dependency traversal and you accept that this may widen the run substantially.

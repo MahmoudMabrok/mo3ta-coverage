@@ -22,12 +22,17 @@ export function main(options) {
     const SHOW_COVERED = options.showCovered === true || options.showCovered === 'true';
     const MODE = options.mode;
     const DEPTH = Number.parseInt(options.depth, 10) || 2;
+    const DRY_RUN = options.dryRun === true || options.dryRun === 'true';
     const CI = options.ci === true || options.ci === 'true';
     const CI_REPORT_PATH = options.ciReport
       ? path.resolve(options.ciReport)
       : path.resolve('coverage', 'mo3ta-coverage-report.md');
 
-    console.log(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE} \nDepth: ${DEPTH} \nCI Mode: ${CI}`);
+    // In dry run, stdout must stay a clean one-path-per-line list, so
+    // diagnostics go to stderr instead of stdout.
+    const infoLog = DRY_RUN ? console.error : console.log;
+
+    infoLog(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE} \nDepth: ${DEPTH} \nDry Run: ${DRY_RUN} \nCI Mode: ${CI}`);
 
     const explicitFiles = getExplicitFiles(options);
     let changedFiles;
@@ -35,10 +40,15 @@ export function main(options) {
     if (explicitFiles.length > 0) {
       // A base branch is still needed to compute the changed lines of each file.
       verifyBaseBranchExists(BASE_BRANCH);
-      console.log(`Scanning ${explicitFiles.length} explicitly provided file(s) (git changed-file detection skipped):\n${explicitFiles.join('\n')}`);
+      infoLog(`Scanning ${explicitFiles.length} explicitly provided file(s) (git changed-file detection skipped):\n${explicitFiles.join('\n')}`);
       changedFiles = explicitFiles;
     } else {
-      changedFiles = getChangedFiles(BASE_BRANCH);
+      changedFiles = getChangedFiles(BASE_BRANCH, infoLog);
+    }
+
+    if (DRY_RUN) {
+      dryRun(changedFiles, MODE, DEPTH);
+      return;
     }
 
     runRelatedTests(changedFiles, MODE, DEPTH);
@@ -117,7 +127,7 @@ export function getExplicitFiles(options = {}) {
   return Array.from(new Set(files));
 }
 
-export function getChangedFiles(BASE_BRANCH) {
+export function getChangedFiles(BASE_BRANCH, log = console.log) {
   // Check if BASE_BRANCH exists (also rejects ref-like options before use)
   verifyBaseBranchExists(BASE_BRANCH);
 
@@ -149,7 +159,7 @@ export function getChangedFiles(BASE_BRANCH) {
       .filter(f => (seen.has(f) ? false : (seen.add(f), true)));
 
     changedFiles.sort();
-    console.log(`Changed files:\n${changedFiles.join('\n')}`);
+    log(`Changed files:\n${changedFiles.join('\n')}`);
     return changedFiles;
   } catch (error) {
     console.error('Error getting changed files:', error.message || error);
@@ -272,6 +282,54 @@ function runRelatedTests(files, mode, depth = 2) {
   }
 
   runJest(['--passWithNoTests', '--coverage', ...finalTestFiles]);
+}
+
+/**
+ * Dry run: only resolve the test files that the selected mode would run,
+ * then print one path per line and exit without running Jest or checking
+ * coverage. The stdout is clean enough for another tool to consume:
+ *   node index.js --dry-run true --files src/a.js --base origin/main
+ * Errors still go to stderr via the catch in main().
+ *
+ * @param {string[]} files - Changed source and test files (repo-relative)
+ * @param {string} mode - Execution mode (fast, smart, or full)
+ * @param {number} depth - Max reverse-dependency depth for smart mode
+ */
+export function dryRun(files, mode, depth = 2) {
+  if (files.length === 0) {
+    // Keep stdout a clean file list; informational messages go to stderr.
+    console.error('✅ No changed source files found.');
+    exit(0);
+  }
+
+  const { sourceFiles, testFiles } = separateSourceAndTestFiles(files);
+
+  // Full mode delegates discovery to Jest; without running it, the only
+  // guaranteed output is the changed files themselves.
+  if (mode === 'full') {
+    // Keep stdout clean (one path per line) for other tools; warn on stderr.
+    console.error('⚠️  full mode relies on Jest --findRelatedTests; --dry-run prints only the changed test files.');
+    testFiles.forEach(file => console.log(file));
+    exit(0);
+  }
+
+  const testFilesToRun = new Set(testFiles);
+
+  sourceFiles.forEach(sourceFile => {
+    // Same matching rules as the real run (see runRelatedTests), just no Jest.
+    const relatedTests = mode === 'smart'
+      ? findRelatedTestFilesBySource(sourceFile, { maxDepth: depth })
+      : findTestFilesForSource(sourceFile);
+
+    if (mode === 'fast' && relatedTests.length === 0) {
+      relatedTests.push(...findTestFilesByImport(sourceFile));
+    }
+
+    relatedTests.forEach(test => testFilesToRun.add(test));
+  });
+
+  Array.from(testFilesToRun).sort().forEach(file => console.log(file));
+  exit(0);
 }
 
 function getChangedLines(filePath, BASE_BRANCH) {

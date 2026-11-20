@@ -5,6 +5,7 @@ import { execSync } from 'child_process';
 import {
   buildMarkdownCoverageReport,
   classifyChangedLineCoverage,
+  dryRun,
   formatMissedLinesSummary,
   getChangedFiles,
   getExplicitFiles,
@@ -281,5 +282,103 @@ describe('getChangedFiles', () => {
     const result = getChangedFiles('main');
 
     expect(result).toEqual(['base.js', 'staged.js']);
+  });
+});
+
+describe('dryRun', () => {
+  let tempDir;
+  let originalCwd;
+  let originalLog;
+  let originalError;
+  let exitSpy;
+  let stdoutLines;
+  let stderrLines;
+
+  beforeEach(() => {
+    originalCwd = process.cwd();
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mo3ta-dry-run-'));
+
+    fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tempDir, 'src', 'example.js'), 'export const example = 1;\n');
+    fs.writeFileSync(
+      path.join(tempDir, 'src', 'example.test.js'),
+      "import { example } from './example';\n\ntest('naming match', () => expect(example).toBe(1));\n"
+    );
+    fs.mkdirSync(path.join(tempDir, 'specs'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempDir, 'specs', 'custom-name.spec.js'),
+      "import { example } from '../src/example';\n\ntest('import match', () => expect(example).toBe(1));\n"
+    );
+
+    // A source file with no naming-convention match: only reachable by import.
+    fs.writeFileSync(path.join(tempDir, 'src', 'bare.js'), 'export const bare = 1;\n');
+    fs.writeFileSync(
+      path.join(tempDir, 'specs', 'custom-name-bare.spec.js'),
+      "import { bare } from '../src/bare';\n\ntest('bare import match', () => expect(bare).toBe(1));\n"
+    );
+
+    process.chdir(tempDir);
+    exitSpy = jest.spyOn(process, 'exit').mockImplementation(code => {
+      throw new Error(`exit:${code}`);
+    });
+
+    stdoutLines = [];
+    stderrLines = [];
+    originalLog = console.log;
+    originalError = console.error;
+    console.log = (...args) => stdoutLines.push(args.join(' '));
+    console.error = (...args) => stderrLines.push(args.join(' '));
+  });
+
+  function runDryRun(files, mode = 'smart', depth = 2) {
+    expect(() => dryRun(files, mode, depth)).toThrow(/^exit:/);
+  }
+
+  afterEach(() => {
+    console.log = originalLog;
+    console.error = originalError;
+    exitSpy.mockRestore();
+    process.chdir(originalCwd);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('prints one matched test path per line (naming + depth-1 import match)', () => {
+    runDryRun(['src/example.js'], 'smart');
+
+    expect(stdoutLines).toEqual(['specs/custom-name.spec.js', 'src/example.test.js']);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('honors the depth limit (depth 0 = naming matches only)', () => {
+    runDryRun(['src/example.js'], 'smart', 0);
+
+    expect(stdoutLines).toEqual(['src/example.test.js']);
+  });
+
+  it('uses the import-scan fallback in fast mode when no naming match exists', () => {
+    runDryRun(['src/bare.js'], 'fast');
+
+    expect(stdoutLines).toEqual(['specs/custom-name-bare.spec.js']);
+  });
+
+  it('prints the changed test files themselves', () => {
+    runDryRun(['src/example.test.js']);
+
+    expect(stdoutLines).toEqual(['src/example.test.js']);
+  });
+
+  it('prints no paths and exits when there are no changed files', () => {
+    runDryRun([]);
+
+    expect(stdoutLines).toEqual([]);
+    expect(stderrLines.some(line => line.includes('No changed source files'))).toBe(true);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('full mode warns on stderr and prints only the changed test files', () => {
+    runDryRun(['src/example.js', 'src/example.test.js'], 'full');
+
+    expect(stdoutLines).toEqual(['src/example.test.js']);
+    expect(stderrLines.some(line => line.includes('--findRelatedTests'))).toBe(true);
   });
 });
