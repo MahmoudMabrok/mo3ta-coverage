@@ -23,14 +23,16 @@ export function main(options) {
     const MODE = options.mode;
     const DEPTH = Number.parseInt(options.depth, 10) || 2;
     const DRY_RUN = options.dryRun === true || options.dryRun === 'true';
+    const VERBOSE = options.verbose === true || options.verbose === 'true';
     const CI = options.ci === true || options.ci === 'true';
     const CI_REPORT_PATH = options.ciReport
       ? path.resolve(options.ciReport)
       : path.resolve('coverage', 'mo3ta-coverage-report.md');
 
-    // In dry run, stdout must stay a clean one-path-per-line list, so
-    // diagnostics go to stderr instead of stdout.
-    const infoLog = DRY_RUN ? console.error : console.log;
+    // In dry run, stdout must stay a clean one-path-per-line list. Hide
+    // diagnostics by default (stderr included, so CI logs stay clean) and
+    // only show them on request via --verbose true.
+    const infoLog = DRY_RUN ? (VERBOSE ? console.error : () => {}) : console.log;
 
     infoLog(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE} \nDepth: ${DEPTH} \nDry Run: ${DRY_RUN} \nCI Mode: ${CI}`);
 

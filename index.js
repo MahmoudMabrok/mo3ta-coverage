@@ -9,10 +9,8 @@ import { verifyBaseBranchExists } from './src/gitUtils.js';
 
 const CONFIG_PATH = path.resolve(process.cwd(), '.mo3ta-coverage.json');
 
-function readConfig(quiet = false) {
-  if (!quiet) {
-    console.log(`Reading config from: ${CONFIG_PATH}`);
-  }
+function readConfig(log = console.log) {
+  log(`Reading config from: ${CONFIG_PATH}`);
 
   if (fs.existsSync(CONFIG_PATH)) {
     return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
@@ -47,6 +45,7 @@ program
   .option('--files <files...>', 'Scan only these files instead of detecting changed files (space- or comma-separated)')
   .option('--filesFrom <path>', 'Read the list of files to scan from a newline-separated file')
   .option('--dryRun <bool>', 'Print the test files that would run (one per line) and exit, without running Jest or the coverage check', false)
+  .option('--verbose <bool>', 'In --dryRun, also print diagnostics (options, changed files) to stderr', false)
   .enablePositionalOptions(); // used to allow using same options in subcommands
 
 // Usage help text (printed next to --help)
@@ -123,7 +122,12 @@ program
 program.action((opts) => {
   const options = program.opts();
   const dryRun = options.dryRun === true || options.dryRun === 'true';
-  const config = readConfig(dryRun);
+  const verbose = options.verbose === true || options.verbose === 'true';
+
+  // In dry run, stdout is reserved for the test file list. Hide all
+  // diagnostics unless --verbose true, which sends them to stderr.
+  const log = dryRun ? (verbose ? console.error : () => {}) : console.log;
+  const config = readConfig(log);
 
   const modeFromCli = program.getOptionValueSource('mode') === 'cli';
   const depthFromCli = program.getOptionValueSource('depth') === 'cli';
@@ -158,8 +162,7 @@ program.action((opts) => {
     options.depth = depth;
   }
 
-  // In dry run, keep stdout a clean one-path-per-line list for other tools.
-  (dryRun ? console.error : console.log)(`Final options: ${JSON.stringify(options, null, 2)}`);
+  log(`Final options: ${JSON.stringify(options, null, 2)}`);
 
   main(options);
 });

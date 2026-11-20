@@ -103,6 +103,7 @@ mo3ta-coverage --mode smart --base origin/main --limit 80
 | `--ci <bool>` | CI mode: emit results as a markdown table and save it to a file so CI can read it without parsing logs | `false` |
 | `--ciReport <path>` | Where to save the CI markdown table | `coverage/mo3ta-coverage-report.md` |
 | `--dryRun <bool>` | Print the test files that would run (one per line) and stop, without running Jest or the coverage check | `false` |
+| `--verbose <bool>` | In `--dryRun`, also print diagnostics (options, changed files) to stderr | `false` |
 
 ## Scanning Selected Files
 
@@ -161,9 +162,10 @@ available to any other tool (e.g. a watch task or another coverage runner):
 mo3ta-coverage --mode smart --base origin/main --dryRun true
 ```
 
-stdout contains only the file list (repo-relative paths, one per line);
-all human-readable diagnostics go to stderr, so `--dryRun` output is safe
-to pipe or capture:
+The output is only the file list (repo-relative paths, one per line);
+diagnostics such as options and changed files are hidden, so `--dryRun`
+output is safe to pipe, capture, or show in a CI log. Pass
+`--verbose true` to print those diagnostics to stderr:
 
 ```sh
 # Feed the discovered tests to another tool
@@ -195,8 +197,8 @@ src/math.spec.js
 
 `src/ops.js` has no same-name spec, but it is re-exported by the
 `src/math.js` barrel and `src/math.spec.js` imports that barrel, so the
-reverse-import walk finds it at depth 2. Only the selected path reaches
-stdout; the diagnostics (changed files, mode, depth) go to stderr.
+reverse-import walk finds it at depth 2. The output is exactly the selected
+path — changed source files are not listed.
 
 ## Modes
 
