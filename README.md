@@ -183,6 +183,21 @@ Notes:
   `--dryRun` can only list the changed test files themselves (a warning is
   printed to stderr).
 
+### Example output
+
+On the demo app, a PR touching `src/ops.js`, the `src/math.js` barrel, and
+`src/math.spec.js` selects exactly one test file:
+
+```console
+$ mo3ta-coverage --base origin/main --mode smart --dryRun true
+src/math.spec.js
+```
+
+`src/ops.js` has no same-name spec, but it is re-exported by the
+`src/math.js` barrel and `src/math.spec.js` imports that barrel, so the
+reverse-import walk finds it at depth 2. Only the selected path reaches
+stdout; the diagnostics (changed files, mode, depth) go to stderr.
+
 ## Modes
 
 - `fast`: Naming-convention matches only, plus a direct import-scan fallback. No dependency traversal.
