@@ -155,7 +155,14 @@ function main() {
     gh(['issue', 'edit', String(existing), '--title', ISSUE_TITLE, '--body', body, '--add-label', ISSUE_LABEL]);
   } else {
     console.log('Opening new vulnerability issue');
-    gh(['issue', 'create', '--title', ISSUE_TITLE, '--body', body, '--label', ISSUE_LABEL]);
+    try {
+      gh(['issue', 'create', '--title', ISSUE_TITLE, '--body', body, '--label', ISSUE_LABEL]);
+    } catch {
+      // Label missing/unusable (e.g. no permission to reference it) — the
+      // issue matters more than the label, so retry without it.
+      console.log(`Could not apply "${ISSUE_LABEL}" label — creating issue without it.`);
+      gh(['issue', 'create', '--title', ISSUE_TITLE, '--body', body]);
+    }
   }
 }
 
