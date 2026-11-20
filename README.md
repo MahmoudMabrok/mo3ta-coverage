@@ -19,6 +19,7 @@ A quick walkthrough of changed-file detection, related-test selection, and chang
 - Walks reverse imports in `smart` mode to a configurable depth (default `2`)
 - Parses `lcov.info` and reports uncovered changed lines
 - Enforces a minimum coverage threshold for changed lines
+- `--dryRun` lists the test files that would run (machine-readable, for other tools)
 
 ## GitHub Action
 
@@ -101,6 +102,7 @@ mo3ta-coverage --mode smart --base origin/main --limit 80
 | `--filesFrom <path>` | Read the file list to scan from a newline-separated file | – |
 | `--ci <bool>` | CI mode: emit results as a markdown table and save it to a file so CI can read it without parsing logs | `false` |
 | `--ciReport <path>` | Where to save the CI markdown table | `coverage/mo3ta-coverage-report.md` |
+| `--dryRun <bool>` | Print the test files that would run (one per line) and stop, without running Jest or the coverage check | `false` |
 
 ## Scanning Selected Files
 
@@ -147,6 +149,39 @@ If you use the
 [GitHub Action](https://github.com/MahmoudMabrok/mo3ta-coverage-action),
 `--ci` is enabled for you and the table is appended to the job summary
 automatically — no `run:` step needed.
+
+## Dry Run (list test files for other tools)
+
+Pass `--dryRun true` to stop after test discovery and print the test files
+that the run *would* execute, one path per line, on stdout — without running
+Jest and without the coverage check. This makes the tool's test selection
+available to any other tool (e.g. a watch task or another coverage runner):
+
+```sh
+mo3ta-coverage --mode smart --base origin/main --dryRun true
+```
+
+stdout contains only the file list (repo-relative paths, one per line);
+all human-readable diagnostics go to stderr, so `--dryRun` output is safe
+to pipe or capture:
+
+```sh
+# Feed the discovered tests to another tool
+mo3ta-coverage --base origin/main --dryRun true | xargs -n 1 npx jest --silent
+
+# Combine with an explicit file list
+mo3ta-coverage --files src/a.js,src/b.ts --base origin/main --dryRun true
+```
+
+Notes:
+
+- Discovery follows the selected `--mode` (default `smart`), so the list
+  matches exactly what a normal run would execute.
+- `--dryRun` still needs a `--base` (changed files are computed against it),
+  but does not need a valid `lcov.info` or a local Jest install.
+- In `full` mode discovery is delegated to Jest's `--findRelatedTests`, so
+  `--dryRun` can only list the changed test files themselves (a warning is
+  printed to stderr).
 
 ## Modes
 

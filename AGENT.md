@@ -61,7 +61,8 @@ index.js
        ├─ verifyGitRepoExists()            src/gitUtils.js
        ├─ getExplicitFiles(options)        --files / --filesFrom, or
        ├─ getChangedFiles(base)            merge-base diff + working tree, all authors
-       ├─ runRelatedTests(files, mode, depth)
+       ├─ dryRun(files, mode, depth)       --dryRun: print the would-run test list, exit 0
+        ├─ runRelatedTests(files, mode, depth)
        │    └─ npx jest ... --coverage
        └─ reportUncoveredChangedLines(...)
             ├─ parseLcov(path)
@@ -142,6 +143,8 @@ import a module which imports the changed file.
   is matched against repo-relative paths by exact match or path suffix.
   Over-matching is acceptable (it may run extra tests) but under-matching is not.
 - `runRelatedTests` exits the process (`exit(0)`/`exit(1)`) rather than throwing.
+- `--dryRun` must keep stdout a clean one-path-per-line list (other tools
+  consume it); informational messages go to stderr.
 - The config subcommand writes `.mo3ta-coverage.json` in `process.cwd()`.
 - CLI options with commander defaults (`mode`, `depth`) override config unless
   you check `program.getOptionValueSource(...) === 'cli'`.

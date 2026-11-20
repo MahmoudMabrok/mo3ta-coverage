@@ -9,9 +9,11 @@ import { verifyBaseBranchExists } from './src/gitUtils.js';
 
 const CONFIG_PATH = path.resolve(process.cwd(), '.mo3ta-coverage.json');
 
-function readConfig() {
-  console.log(`Reading config from: ${CONFIG_PATH}`);
-  
+function readConfig(quiet = false) {
+  if (!quiet) {
+    console.log(`Reading config from: ${CONFIG_PATH}`);
+  }
+
   if (fs.existsSync(CONFIG_PATH)) {
     return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
   }
@@ -44,6 +46,7 @@ program
   .option('--depth <number>', 'Smart mode max reverse-dependency depth (1 = direct importers, 2 = also importers of importers)', '2')
   .option('--files <files...>', 'Scan only these files instead of detecting changed files (space- or comma-separated)')
   .option('--filesFrom <path>', 'Read the list of files to scan from a newline-separated file')
+  .option('--dryRun <bool>', 'Print the test files that would run (one per line) and exit, without running Jest or the coverage check', false)
   .enablePositionalOptions(); // used to allow using same options in subcommands
 
 // Usage help text (printed next to --help)
@@ -53,6 +56,7 @@ Examples:
 $ mo3ta-coverage --mode smart --base origin/main --limit 80
 $ mo3ta-coverage --files src/a.js,src/b.ts --base origin/main
 $ mo3ta-coverage --filesFrom changed.txt --base origin/main
+$ mo3ta-coverage --dry-run true --files src/a.js,src/b.ts --base main
 $ mo3ta-coverage --mode fast --showCovered true
 $ mo3ta-coverage --mode smart --base origin/main --ci true --ciReport coverage/report.md
 $ mo3ta-coverage config --mode smart --depth 2
@@ -117,8 +121,9 @@ program
 
 
 program.action((opts) => {
-  const config = readConfig();
   const options = program.opts();
+  const dryRun = options.dryRun === true || options.dryRun === 'true';
+  const config = readConfig(dryRun);
 
   const modeFromCli = program.getOptionValueSource('mode') === 'cli';
   const depthFromCli = program.getOptionValueSource('depth') === 'cli';
@@ -153,7 +158,8 @@ program.action((opts) => {
     options.depth = depth;
   }
 
-  console.log(`Final options: ${JSON.stringify(options, null, 2)}`);
+  // In dry run, keep stdout a clean one-path-per-line list for other tools.
+  (dryRun ? console.error : console.log)(`Final options: ${JSON.stringify(options, null, 2)}`);
 
   main(options);
 });
