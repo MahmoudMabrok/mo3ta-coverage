@@ -117,6 +117,54 @@ npm link            # exposes the mo3ta-coverage binary globally
 mo3ta-coverage --mode smart --base origin/main --limit 80
 ```
 
+## Recipes
+
+Two common ways to use the CLI straight from GitHub — no global install.
+
+### 1. Get the selected test files, then run Jest yourself
+
+`--dryRun true` stops after test discovery and writes **only** the selected
+test paths to stdout (one per line), so you can review them or hand them to
+Jest directly — no coverage check, no extra runner:
+
+```sh
+# 1. Discover the tests that cover the changed files
+npx github:MahmoudMabrok/mo3ta-coverage \
+  --dryRun true \
+  --mode smart \
+  --base origin/main > selected-tests.txt
+
+# 2. Run exactly those files with Jest
+npx jest $(cat selected-tests.txt)
+```
+
+Or pipe the list straight into Jest:
+
+```sh
+npx github:MahmoudMabrok/mo3ta-coverage --dryRun true --base origin/main \
+  | xargs npx jest
+```
+
+Diagnostics go to stderr, so the file/pipe contains paths only. See
+[Dry Run](#dry-run-list-test-files-for-other-tools) for details.
+
+### 2. Run the coverage check in smart mode
+
+Leave `--dryRun` off and the CLI does the whole job: select the tests, run
+Jest, parse `coverage/lcov.info`, and fail when changed-line coverage is below
+`--limit`:
+
+```sh
+npx github:MahmoudMabrok/mo3ta-coverage \
+  --mode smart \
+  --base origin/main \
+  --limit 80
+```
+
+`smart` follows reverse imports up to `--depth` (default `2`), which catches
+specs that reach the changed file through barrel files. See
+[Modes](#modes) for `fast`, `smart`, and `full`.
+
 ## CLI Options
 
 | Option | Description | Default |
