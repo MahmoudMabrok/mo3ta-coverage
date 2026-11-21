@@ -82,6 +82,35 @@ All inputs, and how to scope the run to specific files (`files` /
 npm install -g mo3ta-coverage
 ```
 
+### Install from GitHub
+
+Prefer the latest commit over the published npm release? Install directly from
+this repository — no publish step, no clone needed:
+
+```sh
+# Global install from the default branch
+npm install -g github:MahmoudMabrok/mo3ta-coverage
+
+# One-off, without installing at all
+npx github:MahmoudMabrok/mo3ta-coverage --mode smart --base origin/main --limit 80
+```
+
+Pin a release tag or a specific commit for reproducible installs:
+
+```sh
+npm install -g github:MahmoudMabrok/mo3ta-coverage#v1.1.0
+npm install -g github:MahmoudMabrok/mo3ta-coverage#<commit-sha>
+```
+
+To build and run from a local checkout instead:
+
+```sh
+git clone https://github.com/MahmoudMabrok/mo3ta-coverage.git
+cd mo3ta-coverage
+npm install
+npm link            # exposes the mo3ta-coverage binary globally
+```
+
 ## Usage
 
 ```sh
