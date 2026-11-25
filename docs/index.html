@@ -59,6 +59,7 @@
       <div class="actions">
         <a class="button primary" href="https://github.com/MahmoudMabrok/mo3ta-coverage">GitHub</a>
         <a class="button ghost" href="https://www.npmjs.com/package/mo3ta-coverage">npm</a>
+        <a class="npm-badge" href="https://www.npmjs.com/package/mo3ta-coverage"><img src="https://img.shields.io/npm/v/mo3ta-coverage" alt="npm version" height="20"></a>
         <a class="button ghost" href="https://mo3ta.top/">mo3ta.top</a>
       </div>
       <figure class="figure">
@@ -156,14 +157,15 @@ npm install -g mo3ta-coverage</pre>
               <tr><td><code>--depth</code></td><td>Smart-mode reverse-import depth (1–10)</td><td><code>2</code></td></tr>
               <tr><td><code>--limit</code></td><td>Minimum changed-line coverage</td><td><code>80</code></td></tr>
               <tr><td><code>--lcov</code></td><td>Path to the lcov report</td><td><code>coverage/lcov.info</code></td></tr>
-              <tr><td><code>--files</code> / <code>--filesFrom</code></td><td>Scan this list instead of detecting changed files</td><td>—</td></tr>
+              <tr><td><code>--files</code> / <code>--filesFrom</code></td><td>Scan this list instead of detecting changed files. <code>--files</code> is space- or comma-separated; <code>--filesFrom</code> is one path per line</td><td>—</td></tr>
               <tr><td><code>--dryRun true</code></td><td>Print selected test paths, one per line, and exit</td><td><code>false</code></td></tr>
               <tr><td><code>--ci true</code></td><td>Write a markdown table (and print it) instead of the verbose log</td><td><code>false</code></td></tr>
+              <tr><td><code>--ciReport</code></td><td>Where <code>--ci</code> saves that markdown table</td><td><code>coverage/mo3ta-coverage-report.md</code></td></tr>
               <tr><td><code>--showCovered true</code></td><td>Also list covered changed lines</td><td><code>false</code></td></tr>
             </tbody>
           </table>
         </div>
-        <p>Pass <code>--files src/a.js,src/b.ts</code> or a newline-separated list via <code>--filesFrom</code> when you want to choose the files yourself. Changed lines for those files are still computed against <code>--base</code>.</p>
+        <p>Pass <code>--files src/a.js src/b.ts</code> or <code>--files src/a.js,src/b.ts</code>, or a newline-separated list via <code>--filesFrom</code>, when you want to choose the files yourself. Changed lines for those files are still computed against <code>--base</code>.</p>
       </div>
     </section>
 
@@ -214,16 +216,15 @@ jobs:
     <section id="mcp">
       <div class="wrap">
         <h2>MCP server for coding agents</h2>
-        <p class="section-intro">The same checks are exposed as MCP tools over stdio, under the bin <code>mo3ta-coverage-mcp</code>. An agent can list the diff, see which tests would run, and read the uncovered lines it should cover. The server calls the CLI’s own functions. It needs Node.js 18 or newer.</p>
-        <div class="note"><strong>Available from the next release.</strong> The current package on npm does not include this bin yet. Until that release is published, start the server from a checkout with <code>node mcp/server.js</code>.</div>
+        <p class="section-intro">The same checks ship in mo3ta-coverage 1.3.0 and later as MCP tools over stdio. The bin is <code>mo3ta-coverage-mcp</code>. An agent can list the diff, see which tests would run, and read the uncovered lines it should cover. The server calls the CLI’s own functions. It needs Node.js 18 or newer.</p>
         <ul class="tool-list">
           <li><code>list_changed_files</code><span>List JS/TS files changed versus a base ref, or an explicit list.</span></li>
-          <li><code>map_related_tests</code><span>Map those files to the tests fast, smart, or full mode would run.</span></li>
-          <li><code>check_changed_line_coverage</code><span>Run the changed-line check and return uncovered lines with source text.</span></li>
+          <li><code>map_related_tests</code><span>Map those files to the tests fast, smart, or full mode would run. In full mode this lists the changed test files; Jest expands the set when a check runs.</span></li>
+          <li><code>check_changed_line_coverage</code><span>Run the changed-line check and return uncovered lines with source text. <code>runTests: false</code> grades an existing <code>lcov.info</code> instead.</span></li>
         </ul>
-        <p>Each tool takes a <code>root</code> path. If you omit it, Claude Code’s <code>CLAUDE_PROJECT_DIR</code> is used when set, otherwise the server’s working directory. <code>check_changed_line_coverage</code> runs the repo’s local Jest (default timeout 5 minutes). A missed threshold comes back as data, with the uncovered lines, rather than a crash.</p>
-        <h3>Cursor</h3>
-        <p>Put this in <code>.cursor/mcp.json</code> once the next release is on npm.</p>
+        <p>Each tool takes a <code>root</code> path. If you omit it, Claude Code’s <code>CLAUDE_PROJECT_DIR</code> is used when set, otherwise the server’s working directory. <code>useConfig</code> defaults to true, so <code>base</code>, <code>mode</code>, and <code>depth</code> come from <code>.mo3ta-coverage.json</code> when that file exists. <code>check_changed_line_coverage</code> runs the repo’s local Jest (default timeout 5 minutes) and writes <code>coverage/</code> there. A missed threshold comes back as data, with the uncovered lines, rather than a crash. A missing git repo, a bad base ref, a missing Jest install, or a timeout comes back as a tool error.</p>
+        <h3>Cursor and other MCP clients</h3>
+        <p>Use <code>npx</code> as the command. The same JSON works in <code>.cursor/mcp.json</code> and in Claude Desktop’s <code>claude_desktop_config.json</code>.</p>
         <div class="terminal">
           <header>
             <span>.cursor/mcp.json</span>
@@ -246,7 +247,7 @@ jobs:
           </header>
           <pre id="cmd-claude">claude mcp add mo3ta-coverage -- npx -y --package mo3ta-coverage mo3ta-coverage-mcp</pre>
         </div>
-        <p>The package name and the bin name differ, so <code>npx</code> needs <code>--package mo3ta-coverage</code>. Claude Desktop uses the same JSON as Cursor, in <code>claude_desktop_config.json</code>.</p>
+        <p>The package name and the bin name differ, so <code>npx</code> needs <code>--package mo3ta-coverage</code>. From a checkout of this repo, <code>node mcp/server.js</code> starts the same server.</p>
       </div>
     </section>
   </main>
@@ -262,6 +263,7 @@ jobs:
       </nav>
     </div>
   </footer>
+  <div class="page-end" id="page-end" aria-hidden="true"></div>
   <script src="site.js"></script>
 </body>
 </html>
