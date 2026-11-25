@@ -15,7 +15,13 @@ function readConfig(quiet = false) {
   }
 
   if (fs.existsSync(CONFIG_PATH)) {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
+    try {
+      return JSON.parse(raw);
+    } catch (error) {
+      console.error(`❌ Could not parse ${CONFIG_PATH}: ${error.message}`);
+      process.exit(1);
+    }
   }
   return {};
 }
@@ -56,7 +62,7 @@ Examples:
 $ mo3ta-coverage --mode smart --base origin/main --limit 80
 $ mo3ta-coverage --files src/a.js,src/b.ts --base origin/main
 $ mo3ta-coverage --filesFrom changed.txt --base origin/main
-$ mo3ta-coverage --dry-run true --files src/a.js,src/b.ts --base main
+$ mo3ta-coverage --dryRun true --files src/a.js,src/b.ts --base main
 $ mo3ta-coverage --mode fast --showCovered true
 $ mo3ta-coverage --mode smart --base origin/main --ci true --ciReport coverage/report.md
 $ mo3ta-coverage config --mode smart --depth 2

@@ -105,8 +105,24 @@ function getTestFileCandidates(sourceFile) {
  * @param {string} sourceFile - Path to source file
  * @returns {string[]} - Array of potential test file paths
  */
-export function findTestFilesForSource(sourceFile) {
-  return getTestFileCandidates(sourceFile).filter(testFile => fs.existsSync(testFile));
+export function findTestFilesForSource(sourceFile, root = process.cwd()) {
+  const candidates = getTestFileCandidates(sourceFile);
+  // The default (cwd) path stays relative. Callers and tests observe the
+  // exact path strings passed to existsSync; resolving them would change that.
+  if (path.resolve(root) === process.cwd()) {
+    return candidates.filter(testFile => fs.existsSync(testFile));
+  }
+  return candidates.filter(testFile => fs.existsSync(path.resolve(root, testFile)));
+}
+
+/**
+ * Drops cached directory walks. The CLI keeps the cache for one process;
+ * long-running callers (the MCP server) clear it between tool calls.
+ */
+export function clearScanCaches() {
+  cachedAllTestFiles = null;
+  cachedAllJsFiles = null;
+  cachedReverseImportIndex = null;
 }
 
 /**

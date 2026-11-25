@@ -311,6 +311,84 @@ mo3ta-coverage config --base origin/main --mode smart --depth 2
 
 This writes `.mo3ta-coverage.json` in the project root.
 
+## MCP server
+
+`mo3ta-coverage` also ships an [MCP](https://modelcontextprotocol.io) server so an agent working in a local checkout can list the changed files, see which tests would run, and read the uncovered changed lines it should write tests for. The server calls the same functions as the CLI. It does not reimplement git diffs, test mapping, or lcov parsing.
+
+The server is a second bin in this package, `mo3ta-coverage-mcp`, speaking MCP over stdio. It lives here rather than in a separate package so one publish ships it, and so it imports this repo's source directly. The CLI flags, stdout, and exit codes are unchanged; the [GitHub Action](https://github.com/MahmoudMabrok/mo3ta-coverage-action) keeps running `node index.js`.
+
+The server requires Node.js 18 or newer. Each tool takes `root` (the checkout to inspect). When `root` is omitted, Claude Code's `CLAUDE_PROJECT_DIR` is used if it is set, otherwise the server process cwd. `useConfig` defaults to true: `base`, `mode`, and `depth` are read from `.mo3ta-coverage.json` when present, and explicit arguments override the file.
+
+| Tool | Purpose |
+| --- | --- |
+| `list_changed_files` | List JS/TS files changed versus a base ref (or an explicit list). |
+| `map_related_tests` | Map those files to the tests `fast`, `smart`, or `full` mode would run. |
+| `check_changed_line_coverage` | Run the changed-line coverage check and return uncovered lines with source text. |
+
+`check_changed_line_coverage` runs the repo's local Jest and writes `coverage/` there, same as the CLI. Jest is killed after `timeoutMs` (default 5 minutes) and only a tail of its output is returned. Pass `runTests: false` to grade an existing `lcov.info` without running tests. A missed threshold comes back as data (`ok: false` plus the uncovered lines), not a crashed tool. A missing git repo, a bad base ref, a missing Jest install, or a timeout comes back as a tool error with a `code` and a hint.
+
+`full` mode still delegates discovery to `jest --findRelatedTests`. `map_related_tests` can only list the changed test files until a check actually runs Jest, matching `--dryRun`.
+
+### Run it
+
+From a checkout, after `npm install`:
+
+```sh
+node mcp/server.js
+# or
+npx --package . -- mo3ta-coverage-mcp
+```
+
+Once this package is published, any project can start it without cloning the repo:
+
+```sh
+npx -y --package mo3ta-coverage mo3ta-coverage-mcp
+```
+
+The bin name and the package name differ, so `npx` needs `--package mo3ta-coverage` to install this package and then run the `mo3ta-coverage-mcp` binary.
+
+### Claude Desktop
+
+Add this to `claude_desktop_config.json` (`~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows):
+
+```json
+{
+  "mcpServers": {
+    "mo3ta-coverage": {
+      "command": "npx",
+      "args": ["-y", "--package", "mo3ta-coverage", "mo3ta-coverage-mcp"]
+    }
+  }
+}
+```
+
+### Cursor
+
+Add this to `.cursor/mcp.json` in the project, or to Cursor's user MCP config:
+
+```json
+{
+  "mcpServers": {
+    "mo3ta-coverage": {
+      "command": "npx",
+      "args": ["-y", "--package", "mo3ta-coverage", "mo3ta-coverage-mcp"]
+    }
+  }
+}
+```
+
+### Claude Code
+
+```sh
+claude mcp add mo3ta-coverage -- npx -y --package mo3ta-coverage mo3ta-coverage-mcp
+```
+
+From a local checkout of this repo, point the command at the script instead:
+
+```sh
+claude mcp add mo3ta-coverage -- node /absolute/path/to/mo3ta-coverage/mcp/server.js
+```
+
 ## How It Works
 
 1. Reads CLI options and saved config from [index.js](index.js).
@@ -325,7 +403,8 @@ This writes `.mo3ta-coverage.json` in the project root.
 
 ```sh
 npm install
-npm test
+npm test     # Jest, then the MCP server tests (node --test)
+node mcp/server.js
 ```
 
 ## Security & dependencies
