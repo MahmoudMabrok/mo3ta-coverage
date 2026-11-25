@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mo3ta-coverage — changed-line coverage for pull requests</title>
+  <meta name="description" content="mo3ta-coverage finds changed JS and TS files, maps them to related Jest tests, and fails the check when changed-line coverage is below your threshold.">
+  <link rel="canonical" href="https://mo3ta.top/mo3ta-coverage/">
+  <meta name="theme-color" content="#f3efe6" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#10131a" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="mo3ta">
+  <meta property="og:title" content="mo3ta-coverage — changed-line coverage for pull requests">
+  <meta property="og:description" content="Find changed JS and TS files, run the related Jest tests, and enforce coverage on the lines that actually changed.">
+  <meta property="og:url" content="https://mo3ta.top/mo3ta-coverage/">
+  <meta property="og:image" content="https://mo3ta.top/mo3ta-coverage/poster.png">
+  <meta property="og:image:alt" content="Poster of mo3ta-coverage modes: fast, smart, and full, plus changed-line coverage features.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="mo3ta-coverage — changed-line coverage for pull requests">
+  <meta name="twitter:description" content="Find changed JS and TS files, run the related Jest tests, and enforce coverage on the lines that actually changed.">
+  <meta name="twitter:image" content="https://mo3ta.top/mo3ta-coverage/poster.png">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareSourceCode",
+    "name": "mo3ta-coverage",
+    "description": "Checks coverage for changed lines in a pull request. Finds changed source files, maps them to likely test files, runs Jest, and validates changed-line coverage against a threshold.",
+    "codeRepository": "https://github.com/MahmoudMabrok/mo3ta-coverage",
+    "url": "https://mo3ta.top/mo3ta-coverage/",
+    "programmingLanguage": "JavaScript",
+    "license": "https://github.com/MahmoudMabrok/mo3ta-coverage/blob/main/LICENSE",
+    "runtimePlatform": "Node.js"
+  }
+  </script>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="./"><img src="favicon.svg" alt="" width="28" height="28"> mo3ta-coverage</a>
+      <nav class="nav" aria-label="Page">
+        <a href="#how">How it works</a>
+        <a href="#modes">Modes</a>
+        <a href="#use">Use it</a>
+        <a href="#action">Action</a>
+        <a href="#mcp">MCP</a>
+      </nav>
+      <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">Dark mode</button>
+    </div>
+  </header>
+
+  <main id="content">
+    <div class="wrap hero">
+      <p class="kicker"><i aria-hidden="true"></i> Changed lines only</p>
+      <h1>Coverage for the lines a pull request actually changed.</h1>
+      <p class="lede">mo3ta-coverage finds changed JavaScript and TypeScript files, maps them to likely Jest tests, runs those tests, and fails when changed-line coverage is below your threshold.</p>
+      <div class="actions">
+        <a class="button primary" href="https://github.com/MahmoudMabrok/mo3ta-coverage">GitHub</a>
+        <a class="button ghost" href="https://www.npmjs.com/package/mo3ta-coverage">npm</a>
+        <a class="button ghost" href="https://mo3ta.top/">mo3ta.top</a>
+      </div>
+      <figure class="figure">
+        <img src="poster.png" width="1600" height="900" alt="Poster titled mo3ta-coverage. Tagline: Changed code. Related specs. Real coverage. Three modes: fast runs naming-convention matches plus a direct import scan; smart, the default, adds a reverse-import walk limited by --depth 2; full passes changed files to jest --findRelatedTests. Features: detect changed JS/TS files for all authors, run related tests, map specs by name and import graph, scan selected files, check changed-line coverage from lcov.info, fail below --limit, report uncovered changed lines, and work locally and in CI.">
+        <figcaption>Modes and features. The sections below are the same behavior, with the commands to run it.</figcaption>
+      </figure>
+    </div>
+
+    <section id="how">
+      <div class="wrap">
+        <h2>How it works</h2>
+        <p class="section-intro">One command, aimed at the diff. It does not try to re-grade the whole repository.</p>
+        <div class="steps">
+          <article class="step">
+            <span>01</span>
+            <h3>Changed files</h3>
+            <p>JS and TS files changed versus a base ref, including every author’s commits, plus staged and unstaged edits.</p>
+          </article>
+          <article class="step">
+            <span>02</span>
+            <h3>Related tests</h3>
+            <p>Maps each source file to likely tests by filename and, in smart mode, by walking imports backward.</p>
+          </article>
+          <article class="step">
+            <span>03</span>
+            <h3>Jest</h3>
+            <p>Runs the local Jest binary with coverage. <code>--dryRun true</code> prints the test paths and stops.</p>
+          </article>
+          <article class="step">
+            <span>04</span>
+            <h3>Changed lines</h3>
+            <p>Reads <code>coverage/lcov.info</code> and counts only coverable lines that differ from the base. Default limit is 80%.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="modes">
+      <div class="wrap">
+        <h2>Three ways to pick tests</h2>
+        <p class="section-intro">Smart is the default. It catches specs that reach a changed file through a barrel or a thin wrapper without walking the whole graph.</p>
+        <div class="cards">
+          <article class="card">
+            <p class="eyebrow">fast</p>
+            <h3>Name, then a direct import</h3>
+            <p>Looks for <code>.test</code> and <code>.spec</code> files, <code>__tests__</code>, and a parallel <code>src/tests</code> layout. If the name misses, it scans test files that import the source directly.</p>
+          </article>
+          <article class="card default">
+            <span class="badge">Default</span>
+            <p class="eyebrow">smart</p>
+            <h3>Name plus reverse imports</h3>
+            <p>Same naming matches, then a reverse-import walk limited by <code>--depth</code>. Depth 1 is a direct importer. Depth 2, the default, also crosses one intermediate module.</p>
+          </article>
+          <article class="card">
+            <p class="eyebrow">full</p>
+            <h3>Let Jest expand</h3>
+            <p>Passes the changed source and test files to <code>jest --findRelatedTests</code>. There is no depth cap. <code>--dryRun</code> can only list the changed test files in this mode.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="use">
+      <div class="wrap">
+        <h2>Install and run</h2>
+        <p class="section-intro">Use the published package, or run the latest commit from GitHub without cloning.</p>
+        <div class="terminal">
+          <header>
+            <span>shell</span>
+            <button class="copy" type="button" data-copy="cmd-run">Copy</button>
+          </header>
+          <pre id="cmd-run">npx mo3ta-coverage --mode smart --base origin/main --limit 80
+
+# latest commit, no global install
+npx github:MahmoudMabrok/mo3ta-coverage --mode smart --base origin/main --limit 80
+
+npm install -g mo3ta-coverage</pre>
+        </div>
+        <p>Save defaults in the project root. Later runs pick up <code>base</code>, <code>mode</code>, and <code>depth</code> from that file when you do not pass them.</p>
+        <div class="terminal">
+          <header>
+            <span>.mo3ta-coverage.json</span>
+            <button class="copy" type="button" data-copy="cmd-config">Copy</button>
+          </header>
+          <pre id="cmd-config">mo3ta-coverage config --base origin/main --mode smart --depth 2</pre>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Flag</th><th>What it does</th><th>Default</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>--base</code></td><td>Git ref to compare against</td><td><code>origin/main</code></td></tr>
+              <tr><td><code>--mode</code></td><td><code>fast</code>, <code>smart</code>, or <code>full</code></td><td><code>smart</code></td></tr>
+              <tr><td><code>--depth</code></td><td>Smart-mode reverse-import depth (1–10)</td><td><code>2</code></td></tr>
+              <tr><td><code>--limit</code></td><td>Minimum changed-line coverage</td><td><code>80</code></td></tr>
+              <tr><td><code>--lcov</code></td><td>Path to the lcov report</td><td><code>coverage/lcov.info</code></td></tr>
+              <tr><td><code>--files</code> / <code>--filesFrom</code></td><td>Scan this list instead of detecting changed files</td><td>—</td></tr>
+              <tr><td><code>--dryRun true</code></td><td>Print selected test paths, one per line, and exit</td><td><code>false</code></td></tr>
+              <tr><td><code>--ci true</code></td><td>Write a markdown table (and print it) instead of the verbose log</td><td><code>false</code></td></tr>
+              <tr><td><code>--showCovered true</code></td><td>Also list covered changed lines</td><td><code>false</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Pass <code>--files src/a.js,src/b.ts</code> or a newline-separated list via <code>--filesFrom</code> when you want to choose the files yourself. Changed lines for those files are still computed against <code>--base</code>.</p>
+      </div>
+    </section>
+
+    <section id="action">
+      <div class="wrap">
+        <h2>GitHub Action</h2>
+        <p class="section-intro"><a href="https://github.com/MahmoudMabrok/mo3ta-coverage-action">mo3ta-coverage-action</a> runs the CLI on Node 20, turns on CI mode, and appends the markdown table to the job summary. Leave <code>base</code> empty and it picks the ref from the event.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Event</th><th>Base used</th></tr></thead>
+            <tbody>
+              <tr><td><code>pull_request</code></td><td>The pull request’s base commit</td></tr>
+              <tr><td><code>push</code></td><td>The previous commit (<code>HEAD~1</code>)</td></tr>
+              <tr><td>schedule, dispatch, other</td><td><code>origin/main</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="terminal">
+          <header>
+            <span>.github/workflows/changed-line-coverage.yml</span>
+            <button class="copy" type="button" data-copy="cmd-action">Copy</button>
+          </header>
+          <pre id="cmd-action">name: Changed-line coverage
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  changed-line-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: npm ci
+      - uses: MahmoudMabrok/mo3ta-coverage-action@v1
+        with:
+          mode: smart
+          depth: 2
+          limit: 80</pre>
+        </div>
+        <p>Checkout needs full history so the merge-base diff is available. Inputs are documented in the <a href="https://github.com/MahmoudMabrok/mo3ta-coverage-action#inputs">action README</a>.</p>
+      </div>
+    </section>
+
+    <section id="mcp">
+      <div class="wrap">
+        <h2>MCP server for coding agents</h2>
+        <p class="section-intro">The same checks are exposed as MCP tools over stdio, under the bin <code>mo3ta-coverage-mcp</code>. An agent can list the diff, see which tests would run, and read the uncovered lines it should cover. The server calls the CLI’s own functions. It needs Node.js 18 or newer.</p>
+        <div class="note"><strong>Available from the next release.</strong> The current package on npm does not include this bin yet. Until that release is published, start the server from a checkout with <code>node mcp/server.js</code>.</div>
+        <ul class="tool-list">
+          <li><code>list_changed_files</code><span>List JS/TS files changed versus a base ref, or an explicit list.</span></li>
+          <li><code>map_related_tests</code><span>Map those files to the tests fast, smart, or full mode would run.</span></li>
+          <li><code>check_changed_line_coverage</code><span>Run the changed-line check and return uncovered lines with source text.</span></li>
+        </ul>
+        <p>Each tool takes a <code>root</code> path. If you omit it, Claude Code’s <code>CLAUDE_PROJECT_DIR</code> is used when set, otherwise the server’s working directory. <code>check_changed_line_coverage</code> runs the repo’s local Jest (default timeout 5 minutes). A missed threshold comes back as data, with the uncovered lines, rather than a crash.</p>
+        <h3>Cursor</h3>
+        <p>Put this in <code>.cursor/mcp.json</code> once the next release is on npm.</p>
+        <div class="terminal">
+          <header>
+            <span>.cursor/mcp.json</span>
+            <button class="copy" type="button" data-copy="cmd-cursor">Copy</button>
+          </header>
+          <pre id="cmd-cursor">{
+  "mcpServers": {
+    "mo3ta-coverage": {
+      "command": "npx",
+      "args": ["-y", "--package", "mo3ta-coverage", "mo3ta-coverage-mcp"]
+    }
+  }
+}</pre>
+        </div>
+        <h3>Claude Code</h3>
+        <div class="terminal">
+          <header>
+            <span>shell</span>
+            <button class="copy" type="button" data-copy="cmd-claude">Copy</button>
+          </header>
+          <pre id="cmd-claude">claude mcp add mo3ta-coverage -- npx -y --package mo3ta-coverage mo3ta-coverage-mcp</pre>
+        </div>
+        <p>The package name and the bin name differ, so <code>npx</code> needs <code>--package mo3ta-coverage</code>. Claude Desktop uses the same JSON as Cursor, in <code>claude_desktop_config.json</code>.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <span>mo3ta-coverage · MIT</span>
+      <nav aria-label="Elsewhere">
+        <a href="https://github.com/MahmoudMabrok/mo3ta-coverage">GitHub</a>
+        <a href="https://www.npmjs.com/package/mo3ta-coverage">npm</a>
+        <a href="https://github.com/MahmoudMabrok/mo3ta-coverage-action">GitHub Action</a>
+        <a href="https://mo3ta.top/">mo3ta.top</a>
+      </nav>
+    </div>
+  </footer>
+  <script src="site.js"></script>
+</body>
+</html>
