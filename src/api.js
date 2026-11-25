@@ -10,6 +10,7 @@ import {
   getExplicitFiles,
   listChangedSourceFiles,
   loadCoverageIndex,
+  parseJestArgs,
   resolveJestBin,
   resolveTestPlan,
   summarizeChangedLineResults,
@@ -115,7 +116,8 @@ function readProjectConfig(root, useConfig) {
     config: {
       base: parsed.base,
       mode: parsed.mode,
-      depth: parsed.depth
+      depth: parsed.depth,
+      jest: parsed.jest
     },
     configPath,
     found: true,
@@ -242,6 +244,9 @@ function openRepo(options = {}) {
     lcov: options.lcov ? String(options.lcov) : DEFAULT_LCOV,
     runTests: options.runTests !== false && options.runTests !== 'false',
     showCovered: options.showCovered === true || options.showCovered === 'true',
+    jestArgs: parseJestArgs(
+      options.jest !== undefined && options.jest !== null ? options.jest : config.jest
+    ),
     timeoutMs,
     ciReport: options.ciReport ? String(options.ciReport) : null,
     configFound: found,
@@ -323,6 +328,7 @@ function settingsView(ctx) {
     depth: ctx.depth,
     limit: ctx.limit,
     lcov: ctx.lcov,
+    jestArgs: ctx.jestArgs,
     configFound: ctx.configFound,
     configUsed: ctx.configUsed
   };
@@ -530,6 +536,31 @@ export function mapRelatedTests(options = {}) {
   return presentPlan(ctx, selected, plan);
 }
 
+/**
+ * Builds the argument array for a captured (non-interactive) Jest run.
+ * Always disables watch mode. Adds `--runInBand` unless the caller already
+ * chose a worker strategy, because Jest rejects `--runInBand` together with
+ * `--maxWorkers` ("only one is allowed").
+ * @param {string[]} [jestArgs]
+ * @returns {string[]}
+ */
+export function buildCapturedJestArgs(jestArgs = []) {
+  const callerSetsWorkers = jestArgs.some(arg =>
+    arg === '--runInBand' ||
+    arg === '-i' ||
+    arg === '--maxWorkers' ||
+    arg === '-w' ||
+    arg.startsWith('--maxWorkers=') ||
+    arg.startsWith('-w=')
+  );
+
+  return [
+    ...jestArgs,
+    '--watchAll=false',
+    ...(callerSetsWorkers ? [] : ['--runInBand'])
+  ];
+}
+
 function runJestCaptured(ctx, jestArgs) {
   const jestBin = resolveJestBin(ctx.root);
   if (!fs.existsSync(jestBin)) {
@@ -541,9 +572,9 @@ function runJestCaptured(ctx, jestArgs) {
   }
 
   // --watchAll=false keeps a non-interactive server from sitting in watch mode.
-  // --runInBand keeps Jest in one process so a timeout can actually stop it.
-  // Neither flag changes which tests or lines the CLI's own arguments select.
-  const args = [...jestArgs, '--watchAll=false', '--runInBand'];
+  // --runInBand keeps Jest in one process so a timeout can actually stop it,
+  // but it is dropped when the caller picked a worker strategy (they conflict).
+  const args = buildCapturedJestArgs(jestArgs);
   try {
     const stdout = execFileSync(process.execPath, [jestBin, ...args], {
       cwd: ctx.root,
@@ -639,7 +670,7 @@ export function checkChangedLineCoverage(options = {}) {
     return result;
   }
 
-  const plan = resolveTestPlan(selected.files, ctx.mode, ctx.depth ?? 2, ctx.root);
+  const plan = resolveTestPlan(selected.files, ctx.mode, ctx.depth ?? 2, ctx.root, ctx.jestArgs);
   const nothingToRun = plan.delegatedToJest
     ? plan.jestTargets.length === 0
     : plan.testsToRun.length === 0;

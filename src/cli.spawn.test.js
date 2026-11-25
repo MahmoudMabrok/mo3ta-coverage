@@ -35,6 +35,45 @@ describe('CLI process behavior', () => {
     expect(result.stdout).not.toContain('--dry-run');
   });
 
+  it('lists the --jest option in help', () => {
+    const result = runCli(root, ['--help']);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('--jest <value>');
+  });
+
+  it('shows the provided jest flags in the options summary', () => {
+    git(root, 'git init -b main -q');
+    git(root, 'git config user.email test@example.com');
+    git(root, 'git config user.name Test');
+    fs.mkdirSync(path.join(root, 'src'));
+    fs.writeFileSync(path.join(root, 'src', 'a.js'), 'module.exports = 1;\n');
+    fs.writeFileSync(path.join(root, 'src', 'a.test.js'), 'test("a", () => expect(1).toBe(1));\n');
+    git(root, 'git add -A && git commit -q -m init');
+
+    const result = runCli(root, ['--dryRun', 'true', '--files', 'src/a.js', '--base', 'main', '--mode', 'fast', '--jest', '--maxWorkers=2', '--jest', '--silent']);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain('--maxWorkers=2');
+    expect(result.stderr).toContain('--silent');
+  });
+
+  it('reads a comma-separated jest flag list into separate flags', () => {
+    git(root, 'git init -b main -q');
+    git(root, 'git config user.email test@example.com');
+    git(root, 'git config user.name Test');
+    fs.mkdirSync(path.join(root, 'src'));
+    fs.writeFileSync(path.join(root, 'src', 'a.js'), 'module.exports = 1;\n');
+    fs.writeFileSync(path.join(root, 'src', 'a.test.js'), 'test("a", () => expect(1).toBe(1));\n');
+    git(root, 'git add -A && git commit -q -m init');
+
+    const result = runCli(root, ['--dryRun', 'true', '--files', 'src/a.js', '--base', 'main', '--mode', 'fast', '--jest', '--maxWorkers=2,--silent']);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain('--maxWorkers=2');
+    expect(result.stderr).toContain('--silent');
+  });
+
   it('dryRun prints only the selected test path on stdout', () => {
     git(root, 'git init -b main -q');
     git(root, 'git config user.email test@example.com');

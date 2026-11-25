@@ -169,11 +169,13 @@ test('check_changed_line_coverage runs Jest and returns the uncovered line', asy
         mode: 'fast',
         limit: 100,
         useConfig: false,
-        timeoutMs: 120000
+        timeoutMs: 120000,
+        jest: ['--silent']
       }
     });
     const data = dataOf(result);
     assert.equal(result.isError, false);
+    assert.deepEqual(data.jestArgs, ['--silent']);
     assert.equal(data.testsFailed, false);
     assert.equal(data.jest.ran, true);
     assert.equal(data.coveragePassed, false);

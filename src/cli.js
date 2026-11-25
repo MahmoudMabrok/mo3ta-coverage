@@ -34,12 +34,14 @@ export function main(options) {
     const CI_REPORT_PATH = options.ciReport
       ? path.resolve(options.ciReport)
       : path.resolve('coverage', 'mo3ta-coverage-report.md');
+    const JEST_FLAGS = parseJestArgs(options.jest);
+    const FILTER = parseFilter(options.filter);
 
     // In dry run, stdout must stay a clean one-path-per-line list, so
     // diagnostics go to stderr instead of stdout.
     const infoLog = DRY_RUN ? console.error : console.log;
 
-    infoLog(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE} \nDepth: ${DEPTH} \nDry Run: ${DRY_RUN} \nCI Mode: ${CI}`);
+    infoLog(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE} \nDepth: ${DEPTH} \nDry Run: ${DRY_RUN} \nCI Mode: ${CI} \nJest Flags: ${JEST_FLAGS.length ? JEST_FLAGS.join(' ') : '(none)'} \nFilter: ${FILTER ? FILTER.source : '(none)'}`);
 
     const explicitFiles = getExplicitFiles(options);
     let changedFiles;
@@ -54,11 +56,11 @@ export function main(options) {
     }
 
     if (DRY_RUN) {
-      dryRun(changedFiles, MODE, DEPTH);
+      dryRun(changedFiles, MODE, DEPTH, FILTER);
       return;
     }
 
-    runRelatedTests(changedFiles, MODE, DEPTH);
+    runRelatedTests(changedFiles, MODE, DEPTH, JEST_FLAGS, FILTER);
     reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED, CI, CI_REPORT_PATH);
 
     if (testsFailed) {
@@ -66,7 +68,11 @@ export function main(options) {
       exit(1);
     }
   } catch (error) {
-    console.error('❌ An unexpected error occurred:', error.message || error);
+    if (error.code === 'INVALID_FILTER') {
+      console.error(`❌ ${error.message}`);
+    } else {
+      console.error('❌ An unexpected error occurred:', error.message || error);
+    }
     exit(1);
   }
 }
@@ -132,6 +138,67 @@ export function getExplicitFiles(options = {}, root = process.cwd()) {
   }
 
   return Array.from(new Set(files));
+}
+
+/**
+ * Normalizes user-provided extra Jest CLI flags into an argument array.
+ * Accepts a single value, a comma-separated string, or an array (the CLI's
+ * repeatable `--jest` option collects each flag as its own entry). Each flag
+ * is trimmed, empty entries dropped, and duplicates removed preserving order.
+ *
+ * Values may start with `--` (they are Jest flags, e.g. `--maxWorkers=2`).
+ * @param {string|string[]} [input]
+ * @returns {string[]}
+ */
+export function parseJestArgs(input) {
+  if (input === undefined || input === null) return [];
+
+  const values = Array.isArray(input) ? input : [input];
+
+  return values
+    .flatMap(value => String(value ?? '').split(','))
+    .map(flag => flag.trim())
+    .filter(flag => flag.length > 0)
+    .filter((flag, index, all) => all.indexOf(flag) === index);
+}
+
+/**
+ * Compiles a user-provided spec filter into a RegExp. Returns null when the
+ * filter is empty. Global/sticky flags are dropped so repeated `.test()` calls
+ * do not depend on `lastIndex`.
+ * @param {string|RegExp} [input]
+ * @returns {RegExp|null}
+ */
+export function parseFilter(input) {
+  if (input === undefined || input === null) return null;
+
+  if (input instanceof RegExp) {
+    return new RegExp(input.source, input.flags.replace(/[gy]/g, ''));
+  }
+
+  const pattern = String(input).trim();
+  if (pattern === '') return null;
+
+  try {
+    return new RegExp(pattern);
+  } catch (error) {
+    const invalid = new Error(`Invalid filter regex "${pattern}": ${error.message}`);
+    invalid.code = 'INVALID_FILTER';
+    throw invalid;
+  }
+}
+
+/**
+ * Keeps the test file paths that match a user-provided regex. An empty filter
+ * returns a copy of the input unchanged.
+ * @param {string[]} files
+ * @param {string|RegExp|null} [filter]
+ * @returns {string[]}
+ */
+export function filterTestFiles(files, filter) {
+  const regex = parseFilter(filter);
+  if (!regex) return [...files];
+  return files.filter(file => regex.test(file));
 }
 
 /**
@@ -219,28 +286,44 @@ function runJest(jestArgs) {
 
 /**
  * Resolves the test files a mode would run, without logging, running Jest, or exiting.
- * `testsToRun` keeps CLI insertion order (changed tests first, then matches).
+ * `testsToRun` keeps CLI insertion order (changed tests first, then matches) and
+ * is filtered by `filter` when provided. `allTestsToRun` keeps the unfiltered
+ * list so callers can log both and let the user validate the filter.
  * Full mode cannot discover related tests without Jest; `testsToRun` is then
  * only the changed test files, and `jestTargets` is what `--findRelatedTests` receives.
  * @param {string[]} files
  * @param {string} mode
  * @param {number} [depth]
  * @param {string} [root]
+ * @param {string[]} [jestArgs] extra Jest CLI flags to append (e.g. `--maxWorkers=2`)
+ * @param {string|RegExp|null} [filter] regex matched against the final test paths
  */
-export function resolveTestPlan(files, mode, depth = 2, root = process.cwd()) {
+export function resolveTestPlan(files, mode, depth = 2, root = process.cwd(), jestArgs = [], filter = null) {
   const { sourceFiles, testFiles } = separateSourceAndTestFiles(files);
+  const filterRegex = parseFilter(filter);
+  const extra = parseJestArgs(jestArgs);
 
   if (mode === 'full') {
-    const jestTargets = [...sourceFiles, ...testFiles];
+    const allTestsToRun = [...testFiles];
+    const testsToRun = filterTestFiles(allTestsToRun, filterRegex);
+    const jestTargets = [...sourceFiles, ...testsToRun];
+    // Jest discovers the related specs itself in full mode, so the filter must
+    // also reach Jest. Modern Jest spells the option in the plural.
+    const fullExtra = filterRegex && !hasJestPathPattern(extra)
+      ? [...extra, '--testPathPatterns', filterRegex.source]
+      : extra;
+
     return {
       mode,
       depth,
+      filter: filterRegex ? filterRegex.source : null,
       sourceFiles,
       testFiles,
       mappings: [],
-      testsToRun: [...testFiles],
+      allTestsToRun,
+      testsToRun,
       jestTargets,
-      jestArgs: ['--findRelatedTests', '--passWithNoTests', '--coverage', ...jestTargets],
+      jestArgs: ['--findRelatedTests', '--passWithNoTests', '--coverage', ...jestTargets, ...fullExtra],
       delegatedToJest: true
     };
   }
@@ -269,29 +352,63 @@ export function resolveTestPlan(files, mode, depth = 2, root = process.cwd()) {
       }
     }
 
+    const filteredTests = filterTestFiles(relatedTests, filterRegex);
     mappings.push({
       source: sourceFile,
-      tests: [...relatedTests],
+      tests: filteredTests,
+      allTests: [...relatedTests],
       matchType
     });
-    relatedTests.forEach(test => testFilesToRun.add(test));
+    filteredTests.forEach(test => testFilesToRun.add(test));
   });
 
-  const testsToRun = Array.from(testFilesToRun);
+  const allTestsToRun = Array.from(testFilesToRun);
+  const testsToRun = filterTestFiles(allTestsToRun, filterRegex);
   return {
     mode,
     depth,
+    filter: filterRegex ? filterRegex.source : null,
     sourceFiles,
     testFiles,
     mappings,
+    allTestsToRun,
     testsToRun,
     jestTargets: testsToRun,
-    jestArgs: ['--passWithNoTests', '--coverage', ...testsToRun],
+    jestArgs: ['--passWithNoTests', '--coverage', ...testsToRun, ...extra],
     delegatedToJest: false
   };
 }
 
-function runRelatedTests(files, mode, depth = 2) {
+function hasJestPathPattern(jestArgs) {
+  return jestArgs.some(arg =>
+    arg === '--testPathPatterns' ||
+    arg.startsWith('--testPathPatterns=') ||
+    arg === '--testPathPattern' ||
+    arg.startsWith('--testPathPattern=')
+  );
+}
+
+/**
+ * Logs the full candidate list and the filtered list so the user can validate
+ * the regex before any tests run.
+ * @param {ReturnType<typeof resolveTestPlan>} plan
+ * @param {(...args: any[]) => void} [log]
+ */
+function logFilteredTestFiles(plan, log = console.log) {
+  if (!plan.filter) return;
+
+  log(`\n🔎 Filter regex: /${plan.filter}/`);
+  log(`   All test files before filter (${plan.allTestsToRun.length}):`);
+  plan.allTestsToRun.forEach(file => log(`     - ${file}`));
+  log(`   Test files after filter (${plan.testsToRun.length}):`);
+  if (plan.testsToRun.length === 0) {
+    log('     (none)');
+  } else {
+    plan.testsToRun.forEach(file => log(`     - ${file}`));
+  }
+}
+
+function runRelatedTests(files, mode, depth = 2, jestArgs = [], filter = null) {
   if (files.length === 0) {
     console.log('✅ No changed source files found.');
     exit(0);
@@ -299,7 +416,7 @@ function runRelatedTests(files, mode, depth = 2) {
 
   console.log('🔍 Analyzing changed files for optimal test execution...');
 
-  const plan = resolveTestPlan(files, mode, depth);
+  const plan = resolveTestPlan(files, mode, depth, process.cwd(), jestArgs, filter);
   const { sourceFiles, testFiles } = plan;
 
   console.log(`\n📊 Changed files breakdown:`);
@@ -314,6 +431,8 @@ function runRelatedTests(files, mode, depth = 2) {
     testFiles.forEach(file => console.log(`     - ${file}`));
   }
 
+  logFilteredTestFiles(plan);
+
   // Full mode delegates discovery to Jest, so pass the changed files themselves.
   if (mode === 'full') {
     const jestTargets = plan.jestTargets;
@@ -324,7 +443,7 @@ function runRelatedTests(files, mode, depth = 2) {
     }
 
     console.log(`\n📝 Test strategy: full (Jest --findRelatedTests, unbounded traversal)`);
-    console.log(`   Running tests related to ${sourceFiles.length} source file(s) + ${testFiles.length} changed test(s)`);
+    console.log(`   Running tests related to ${sourceFiles.length} source file(s) + ${plan.testsToRun.length} changed test(s)`);
     console.log(`   ⚠️  If this expands to too many tests, switch to --mode smart`);
     console.log('   Files passed to Jest:');
     jestTargets.forEach(file => console.log(`     - ${file}`));
@@ -333,9 +452,11 @@ function runRelatedTests(files, mode, depth = 2) {
     return;
   }
 
-  plan.mappings.forEach(({ source, tests, matchType }) => {
+  plan.mappings.forEach(({ source, tests, allTests, matchType }) => {
     if (tests.length > 0) {
       console.log(`   ✓ ${source} → ${tests.length} test file(s) (${matchType})`);
+    } else if (allTests.length > 0) {
+      console.log(`   ⚠ ${source} → No test file after filter (${allTests.length} matched before filter)`);
     } else {
       console.log(`   ⚠ ${source} → No test file found`);
     }

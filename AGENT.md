@@ -62,8 +62,8 @@ index.js
        ├─ getExplicitFiles(options)        --files / --filesFrom, or
        ├─ getChangedFiles(base)            merge-base diff + working tree, all authors
        ├─ dryRun(files, mode, depth)       --dryRun: print the would-run test list, exit 0
-        ├─ runRelatedTests(files, mode, depth)
-       │    └─ npx jest ... --coverage
+        ├─ runRelatedTests(files, mode, depth, jestFlags)
+       │    └─ npx jest ... --coverage [--jest flags]
        └─ reportUncoveredChangedLines(...)
             ├─ parseLcov(path)
             ├─ getChangedLines(file, base) git diff -U0
@@ -143,6 +143,13 @@ import a module which imports the changed file.
   is matched against repo-relative paths by exact match or path suffix.
   Over-matching is acceptable (it may run extra tests) but under-matching is not.
 - `runRelatedTests` exits the process (`exit(0)`/`exit(1)`) rather than throwing.
+- Extra Jest flags come from `--jest` (repeatable or comma-separated, parsed by
+  `parseJestArgs`) and are appended after the selected test files in
+  `resolveTestPlan`. `.mo3ta-coverage.json` can store a `jest` array as a default;
+  a CLI `--jest` overrides it. The API/MCP path reads the same `jest` option.
+- The API's captured run (`buildCapturedJestArgs`) adds `--runInBand` for
+  timeout control, but drops it when the caller passes `--maxWorkers`/`-w`/`-i`
+  because Jest rejects `--runInBand` together with `--maxWorkers`.
 - `--dryRun` must keep stdout a clean one-path-per-line list (other tools
   consume it); informational messages go to stderr.
 - The config subcommand writes `.mo3ta-coverage.json` in `process.cwd()`.
