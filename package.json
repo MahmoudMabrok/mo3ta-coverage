@@ -2,6 +2,7 @@
   "name": "mo3ta-coverage",
   "version": "1.2.0",
   "description": "Run tests and report uncovered changed lines in a PR",
+  "homepage": "https://mo3ta.top/mo3ta-coverage/",
   "main": "index.js",
   "bin": {
     "mo3ta-coverage": "./index.js",
