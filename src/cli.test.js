@@ -10,8 +10,10 @@ import {
   getChangedFiles,
   getExplicitFiles,
   normalizeExplicitFiles,
+  parseJestArgs,
   parseLcov,
   readExplicitFilesFromFile,
+  resolveTestPlan,
   summarizeCoverageResult,
   writeMarkdownReport
 } from './cli.js';
@@ -235,6 +237,50 @@ describe('getExplicitFiles', () => {
     })).toEqual(['src/a.js', 'src/b.js']);
 
     fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+});
+
+describe('parseJestArgs', () => {
+  it('returns an empty array for no input', () => {
+    expect(parseJestArgs()).toEqual([]);
+    expect(parseJestArgs(null)).toEqual([]);
+    expect(parseJestArgs(undefined)).toEqual([]);
+  });
+
+  it('accepts a single flag string', () => {
+    expect(parseJestArgs('--silent')).toEqual(['--silent']);
+  });
+
+  it('splits a comma-separated string into flags', () => {
+    expect(parseJestArgs('--maxWorkers=2,--silent')).toEqual(['--maxWorkers=2', '--silent']);
+  });
+
+  it('accepts an array of flags (repeatable --jest)', () => {
+    expect(parseJestArgs(['--maxWorkers=2', '--silent'])).toEqual(['--maxWorkers=2', '--silent']);
+  });
+
+  it('trims, drops empty entries, and de-duplicates preserving order', () => {
+    expect(parseJestArgs([' --silent', ' --silent', '', '  ', '--ci'])).toEqual(['--silent', '--ci']);
+  });
+});
+
+describe('resolveTestPlan jest flags', () => {
+  it('appends extra flags to fast mode jestArgs after the test files', () => {
+    const plan = resolveTestPlan(['src/example.test.js'], 'fast', 2, process.cwd(), ['--maxWorkers=2', '--silent']);
+
+    expect(plan.jestArgs).toEqual(['--passWithNoTests', '--coverage', 'src/example.test.js', '--maxWorkers=2', '--silent']);
+  });
+
+  it('appends extra flags to full mode jestArgs after the targets', () => {
+    const plan = resolveTestPlan(['src/example.js', 'src/example.test.js'], 'full', 2, process.cwd(), ['--silent']);
+
+    expect(plan.jestArgs).toEqual(['--findRelatedTests', '--passWithNoTests', '--coverage', 'src/example.js', 'src/example.test.js', '--silent']);
+  });
+
+  it('omits extra flags when none are provided', () => {
+    const plan = resolveTestPlan(['src/example.test.js'], 'fast', 2, process.cwd());
+
+    expect(plan.jestArgs).toEqual(['--passWithNoTests', '--coverage', 'src/example.test.js']);
   });
 });
 

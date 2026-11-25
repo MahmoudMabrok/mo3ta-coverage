@@ -24,6 +24,9 @@ const modeField = z.string().optional().describe(
 const depthField = z.union([z.number(), z.string()]).optional().describe(
   'Smart-mode reverse-import depth, an integer from 1 to 10. 1 = tests that import the file. 2 (default) = also one intermediate module.'
 );
+const jestArgsField = z.union([z.array(z.string()), z.string()]).optional().describe(
+  'Extra Jest CLI flags to pass through, e.g. ["--maxWorkers=4","--silent"] or "--maxWorkers=4,--silent". Appended to the tool\'s own Jest arguments.'
+);
 const useConfigField = z.boolean().optional().describe(
   'Read base, mode, and depth defaults from .mo3ta-coverage.json in the repo. Default true. Explicit arguments override the file. Set false to ignore a broken config.'
 );
@@ -159,6 +162,7 @@ export function createServer({ version = '0.0.0' } = {}) {
         ciReport: z.string().optional().describe(
           'Also write the CLI markdown table to this path (relative to root). Omitted by default so the tool does not create a report file.'
         ),
+        jest: jestArgsField,
         useConfig: useConfigField
       }
     },

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { main } from './src/cli.js';
 import fs from 'fs';
 import path from 'path';
@@ -31,6 +31,14 @@ function writeConfig(config) {
   console.log(`Updated config: ${JSON.stringify(config, null, 2)}`);
 }
 
+// commander accumulator for the repeatable `--jest` option: each occurrence is
+// appended, and a comma within one value splits it into separate flags. The
+// result stays in the order the user typed the flags.
+function collectJest(value, previous) {
+  const list = Array.isArray(previous) && previous.length > 0 ? previous : [];
+  return list.concat(String(value).split(',').map(flag => flag.trim()).filter(Boolean));
+}
+
 const program = new Command();
 
 const PkgPath = new URL('./package.json', import.meta.url);
@@ -52,6 +60,7 @@ program
   .option('--depth <number>', 'Smart mode max reverse-dependency depth (1 = direct importers, 2 = also importers of importers)', '2')
   .option('--files <files...>', 'Scan only these files instead of detecting changed files (space- or comma-separated)')
   .option('--filesFrom <path>', 'Read the list of files to scan from a newline-separated file')
+  .addOption(new Option('--jest <value>', 'Extra Jest CLI flag, e.g. --maxWorkers=2 (repeatable or comma-separated)').argParser(collectJest))
   .option('--dryRun <bool>', 'Print the test files that would run (one per line) and exit, without running Jest or the coverage check', false)
   .enablePositionalOptions(); // used to allow using same options in subcommands
 
@@ -65,6 +74,7 @@ $ mo3ta-coverage --filesFrom changed.txt --base origin/main
 $ mo3ta-coverage --dryRun true --files src/a.js,src/b.ts --base main
 $ mo3ta-coverage --mode fast --showCovered true
 $ mo3ta-coverage --mode smart --base origin/main --ci true --ciReport coverage/report.md
+$ mo3ta-coverage --base origin/main --jest --maxWorkers=2 --jest --silent
 $ mo3ta-coverage config --mode smart --depth 2
 $ mo3ta-coverage --version
 
@@ -76,12 +86,13 @@ Modes:
 See README.md for details: https://github.com/MahmoudMabrok/mo3ta-coverage`);
 
 
-program
+const configCommand = program
   .command('config')
   .description('Set or get configuration options')
   .option('--base <branch>', 'Set default base branch')
   .option('--mode <mode>', 'Set default mode (fast/smart/full)')
   .option('--depth <number>', 'Set default smart-mode depth (1-10)')
+  .addOption(new Option('--jest <value>', 'Set default extra Jest CLI flag, e.g. --maxWorkers=2 (repeatable or comma-separated)').argParser(collectJest))
   .action((opts) => {
     let config = readConfig();
 
@@ -89,7 +100,7 @@ program
 
     if (opts.base) {
       verifyBaseBranchExists(opts.base);
-      
+
       config.base = opts.base;
       updated = true;
       console.log(`Default base branch set to: ${opts.base}`);
@@ -116,6 +127,12 @@ program
       updated = true;
       console.log(`Default smart-mode depth set to: ${config.depth}`);
     }
+
+    if (configCommand.getOptionValueSource('jest') === 'cli') {
+      config.jest = opts.jest;
+      updated = true;
+      console.log(`Default Jest flags set to: ${opts.jest.join(' ')}`);
+    }
     if (updated) {
       writeConfig(config);
     } else {
@@ -133,7 +150,8 @@ program.action((opts) => {
 
   const modeFromCli = program.getOptionValueSource('mode') === 'cli';
   const depthFromCli = program.getOptionValueSource('depth') === 'cli';
- 
+  const jestFromCli = program.getOptionValueSource('jest') === 'cli';
+
   // Use config base if not provided in CLI
   if (!options.base && config.base) {
     options.base = config.base;
@@ -143,6 +161,10 @@ program.action((opts) => {
 
   if (!modeFromCli && config.mode) {
     options.mode = config.mode;
+  }
+
+  if (!jestFromCli && config.jest !== undefined && config.jest !== null) {
+    options.jest = config.jest;
   }
 
   options.mode = String(options.mode || 'smart').toLowerCase();

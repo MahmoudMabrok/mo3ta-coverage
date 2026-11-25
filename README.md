@@ -179,6 +179,7 @@ specs that reach the changed file through barrel files. See
 | `--depth <number>` | Max reverse-import depth used by `smart` (`1` or `2` recommended) | `2` |
 | `--files <files...>` | Scan only these files instead of auto-detecting changed files (space- or comma-separated) | – |
 | `--filesFrom <path>` | Read the file list to scan from a newline-separated file | – |
+| `--jest <value>` | Extra Jest CLI flag passed through to the run, e.g. `--maxWorkers=2`. Repeatable or comma-separated | – |
 | `--ci <bool>` | CI mode: emit results as a markdown table and save it to a file so CI can read it without parsing logs | `false` |
 | `--ciReport <path>` | Where to save the CI markdown table | `coverage/mo3ta-coverage-report.md` |
 | `--dryRun <bool>` | Print the test files that would run (one per line) and stop, without running Jest or the coverage check | `false` |
@@ -204,6 +205,45 @@ mo3ta-coverage --filesFrom changed.txt --base origin/main
 Explicitly provided files skip git changed-file detection. Their changed lines
 are still computed against `--base`, so only lines that differ from the base
 branch are counted toward coverage.
+
+## Passing Extra Jest Flags
+
+Use `--jest` to forward any Jest CLI flag to the underlying Jest run, for
+example to control parallelism or silence output. Pass it once per flag, or
+comma-separate several flags in one value:
+
+```sh
+# Limit Jest to 2 workers and run silently
+mo3ta-coverage --base origin/main --jest --maxWorkers=2 --jest --silent
+
+# Same thing, comma-separated
+mo3ta-coverage --base origin/main --jest "--maxWorkers=2,--silent"
+
+# A single flag that takes a value
+mo3ta-coverage --base origin/main --jest --maxWorkers=50%
+```
+
+The flags are appended to the arguments mo3ta-coverage already passes
+(`--coverage`, `--passWithNoTests`, and the selected test files), so they are
+handled by Jest's own argument parser. Use them for things like `--maxWorkers`,
+`--silent`, `--ci`, `--bail`, `--testTimeout`, or `--coverageDirectory`.
+
+Jest flags that take a value work best in the `=` form (`--maxWorkers=2`). If a
+flag's value is normally separated by a space, give each token its own `--jest`:
+
+```sh
+# Equivalent to: jest --maxWorkers 2
+mo3ta-coverage --base origin/main --jest --maxWorkers --jest 2
+```
+
+To make flags the default for a repo, save them with the `config` subcommand:
+
+```sh
+mo3ta-coverage config --jest --maxWorkers=2 --jest --silent
+# written to .mo3ta-coverage.json as "jest": ["--maxWorkers=2", "--silent"]
+```
+
+A `--jest` value on the command line overrides the saved list.
 
 ## CI Mode
 
@@ -311,7 +351,9 @@ You can persist defaults with the `config` subcommand:
 mo3ta-coverage config --base origin/main --mode smart --depth 2
 ```
 
-This writes `.mo3ta-coverage.json` in the project root.
+This writes `.mo3ta-coverage.json` in the project root. The `base`, `mode`,
+`depth`, and `jest` (extra Jest flags) defaults are supported. For example,
+`mo3ta-coverage config --jest --maxWorkers=2` saves a default Jest worker cap.
 
 ## MCP server
 
@@ -319,7 +361,7 @@ This writes `.mo3ta-coverage.json` in the project root.
 
 The server is a second bin in this package, `mo3ta-coverage-mcp`, speaking MCP over stdio. It lives here rather than in a separate package so one publish ships it, and so it imports this repo's source directly. The CLI flags, stdout, and exit codes are unchanged; the [GitHub Action](https://github.com/MahmoudMabrok/mo3ta-coverage-action) keeps running `node index.js`.
 
-The server requires Node.js 18 or newer. Each tool takes `root` (the checkout to inspect). When `root` is omitted, Claude Code's `CLAUDE_PROJECT_DIR` is used if it is set, otherwise the server process cwd. `useConfig` defaults to true: `base`, `mode`, and `depth` are read from `.mo3ta-coverage.json` when present, and explicit arguments override the file.
+The server requires Node.js 18 or newer. Each tool takes `root` (the checkout to inspect). When `root` is omitted, Claude Code's `CLAUDE_PROJECT_DIR` is used if it is set, otherwise the server process cwd. `useConfig` defaults to true: `base`, `mode`, `depth`, and `jest` are read from `.mo3ta-coverage.json` when present, and explicit arguments override the file.
 
 | Tool | Purpose |
 | --- | --- |
@@ -327,7 +369,7 @@ The server requires Node.js 18 or newer. Each tool takes `root` (the checkout to
 | `map_related_tests` | Map those files to the tests `fast`, `smart`, or `full` mode would run. |
 | `check_changed_line_coverage` | Run the changed-line coverage check and return uncovered lines with source text. |
 
-`check_changed_line_coverage` runs the repo's local Jest and writes `coverage/` there, same as the CLI. Jest is killed after `timeoutMs` (default 5 minutes) and only a tail of its output is returned. Pass `runTests: false` to grade an existing `lcov.info` without running tests. A missed threshold comes back as data (`ok: false` plus the uncovered lines), not a crashed tool. A missing git repo, a bad base ref, a missing Jest install, or a timeout comes back as a tool error with a `code` and a hint.
+`check_changed_line_coverage` runs the repo's local Jest and writes `coverage/` there, same as the CLI. Jest is killed after `timeoutMs` (default 5 minutes) and only a tail of its output is returned. Pass `runTests: false` to grade an existing `lcov.info` without running tests. Pass `jest` (an array of flags or a comma-separated string, e.g. `["--maxWorkers=4"]`) to forward extra Jest CLI flags. A missed threshold comes back as data (`ok: false` plus the uncovered lines), not a crashed tool. A missing git repo, a bad base ref, a missing Jest install, or a timeout comes back as a tool error with a `code` and a hint.
 
 `full` mode still delegates discovery to `jest --findRelatedTests`. `map_related_tests` can only list the changed test files until a check actually runs Jest, matching `--dryRun`.
 

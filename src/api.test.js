@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
 import {
+  buildCapturedJestArgs,
   checkChangedLineCoverage,
   listChangedFiles,
   mapRelatedTests,
@@ -57,6 +58,18 @@ describe('programmatic coverage API', () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
     root = undefined;
+  });
+
+  it('adds --runInBand by default for captured runs', () => {
+    expect(buildCapturedJestArgs(['--coverage'])).toEqual(['--coverage', '--watchAll=false', '--runInBand']);
+  });
+
+  it('drops --runInBand when the caller sets a worker strategy', () => {
+    expect(buildCapturedJestArgs(['--maxWorkers=2'])).toEqual(['--maxWorkers=2', '--watchAll=false']);
+    expect(buildCapturedJestArgs(['--maxWorkers', '2'])).toEqual(['--maxWorkers', '2', '--watchAll=false']);
+    expect(buildCapturedJestArgs(['-w', '2'])).toEqual(['-w', '2', '--watchAll=false']);
+    expect(buildCapturedJestArgs(['--runInBand'])).toEqual(['--runInBand', '--watchAll=false']);
+    expect(buildCapturedJestArgs(['-i'])).toEqual(['-i', '--watchAll=false']);
   });
 
   it('rejects a directory that is not a git repo', () => {
@@ -174,6 +187,47 @@ describe('programmatic coverage API', () => {
 
     const override = mapRelatedTests({ root, files: ['src/keep.js'], mode: 'full' });
     expect(override.mode).toBe('full');
+  });
+
+  it('accepts extra Jest flags and reads a jest default from the config file', () => {
+    root = initRepo('mo3ta-jest-config-');
+    writeMathFeature(root);
+    const source = path.join(root, 'src', 'math.js');
+    const lcov = path.join(root, 'coverage', 'lcov.info');
+    fs.mkdirSync(path.dirname(lcov), { recursive: true });
+    fs.writeFileSync(lcov, ['TN:', `SF:${source}`, 'DA:2,1', 'end_of_record', ''].join('\n'));
+
+    const explicit = checkChangedLineCoverage({
+      root,
+      base: 'main',
+      files: ['src/math.js'],
+      mode: 'fast',
+      runTests: false,
+      jest: ['--maxWorkers=2', '--silent'],
+      useConfig: false
+    });
+    expect(explicit.jestArgs).toEqual(['--maxWorkers=2', '--silent']);
+
+    fs.writeFileSync(path.join(root, '.mo3ta-coverage.json'), JSON.stringify({
+      base: 'main',
+      mode: 'fast',
+      jest: ['--bail']
+    }));
+
+    const fromConfig = checkChangedLineCoverage({
+      root,
+      files: ['src/math.js'],
+      runTests: false
+    });
+    expect(fromConfig.jestArgs).toEqual(['--bail']);
+
+    const override = checkChangedLineCoverage({
+      root,
+      files: ['src/math.js'],
+      runTests: false,
+      jest: '--maxWorkers=1,--silent'
+    });
+    expect(override.jestArgs).toEqual(['--maxWorkers=1', '--silent']);
   });
 
   it('reports an invalid config file instead of throwing a raw parse error', () => {
