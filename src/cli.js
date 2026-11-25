@@ -3,6 +3,10 @@ import fs from 'fs';
 import path from 'path';
 import { exit } from 'process';
 import { verifyBaseBranchExists, verifyGitRepoExists } from './gitUtils.js';
+
+// Set when Jest exits non-zero. `main` resets it so a later in-process call
+// does not inherit the previous failure. The CLI process still exits.
+let testsFailed = false;
 import {
   getJsOnlyFiles,
   separateSourceAndTestFiles,
@@ -12,6 +16,9 @@ import {
 } from './fileUtils.js';
 
 export function main(options) {
+  // A single CLI process exits after one run. Reset anyway so an in-process
+  // caller does not inherit a failure from an earlier invocation.
+  testsFailed = false;
   try {
     // Check if current directory is a git repository
     verifyGitRepoExists();
@@ -113,52 +120,69 @@ export function readExplicitFilesFromFile(listPath, root = process.cwd()) {
  * @param {{files?: string|string[], filesFrom?: string}} options
  * @returns {string[]}
  */
-export function getExplicitFiles(options = {}) {
+export function getExplicitFiles(options = {}, root = process.cwd()) {
   const files = [];
 
   if (options.files !== undefined && options.files !== null && options.files !== false) {
-    files.push(...normalizeExplicitFiles(options.files));
+    files.push(...normalizeExplicitFiles(options.files, root));
   }
 
   if (options.filesFrom) {
-    files.push(...readExplicitFilesFromFile(options.filesFrom));
+    files.push(...readExplicitFilesFromFile(options.filesFrom, root));
   }
 
   return Array.from(new Set(files));
 }
 
-export function getChangedFiles(BASE_BRANCH, log = console.log) {
-  // Check if BASE_BRANCH exists (also rejects ref-like options before use)
-  verifyBaseBranchExists(BASE_BRANCH);
-
+/**
+ * Lists changed JS/TS files vs `baseBranch` without logging or exiting.
+ * Includes commits from every author since the merge base, plus staged and
+ * unstaged edits. Throws when git itself fails.
+ * @param {string} baseBranch
+ * @param {string} [root]
+ * @returns {string[]}
+ */
+export function listChangedSourceFiles(baseBranch, root = process.cwd()) {
   // Compare the merge base with HEAD so every file changed on this branch is
   // included, regardless of which author committed it.
   //
   // Git is always invoked with an argument array (never through a shell) so
   // refs and file paths can't inject commands, and output is de-duplicated
   // in JS instead of piping through `sort -u`.
+  const gitFiles = (args) => execFileSync('git', args, {
+    cwd: root,
+    stdio: ['ignore', 'pipe', 'ignore']
+  }).toString();
+
+  const mergeBase = gitFiles(['merge-base', 'HEAD', baseBranch]).trim();
+
+  const seen = new Set();
+  const changedFiles = [
+    // Added or modified files between the merge base and HEAD
+    gitFiles(['diff', '--name-only', '--diff-filter=AM', `${mergeBase}..HEAD`]),
+    // Unstaged changes in the working tree
+    gitFiles(['diff', '--name-only', '--diff-filter=AM']),
+    // Staged changes
+    gitFiles(['diff', '--cached', '--name-only', '--diff-filter=AM'])
+  ]
+    .flatMap(output => output.split(/\r?\n/))
+    .map(file => file.trim())
+    .filter(file => file.length > 0 && file.match(/\.(js|ts|jsx|tsx)$/))
+    // Defensive: ignore dependency/build/coverage artifacts even if git tracked them
+    .filter(file => !file.match(/(^|\/)(node_modules|coverage|dist|build)\/|(^|\/)\.git\//))
+    // De-duplicate (replaces `sort -u`); insertion order keeps first-seen wins
+    .filter(file => (seen.has(file) ? false : (seen.add(file), true)));
+
+  changedFiles.sort();
+  return changedFiles;
+}
+
+export function getChangedFiles(BASE_BRANCH, log = console.log, root = process.cwd()) {
+  // Check if BASE_BRANCH exists (also rejects ref-like options before use)
+  verifyBaseBranchExists(BASE_BRANCH, root);
+
   try {
-    const gitFiles = (args) => execFileSync('git', args, { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
-
-    const mergeBase = gitFiles(['merge-base', 'HEAD', BASE_BRANCH]).trim();
-
-    const seen = new Set();
-    const changedFiles = [
-      // Added or renamed files between the merge base and HEAD
-      gitFiles(['diff', '--name-only', '--diff-filter=AM', `${mergeBase}..HEAD`]),
-      // Unstaged changes in the working tree
-      gitFiles(['diff', '--name-only', '--diff-filter=AM']),
-      // Staged changes
-      gitFiles(['diff', '--cached', '--name-only', '--diff-filter=AM'])
-    ]
-      .flatMap(output => output.split('\n'))
-      .filter(f => f.trim().length > 0 && f.match(/\.(js|ts|jsx|tsx)$/))
-      // Defensive: ignore dependency/build/coverage artifacts even if git tracked them
-      .filter(f => !f.match(/(^|\/)(node_modules|coverage|dist|build)\/|(^|\/)\.git\//))
-      // De-duplicate (replaces `sort -u`); insertion order keeps first-seen wins
-      .filter(f => (seen.has(f) ? false : (seen.add(f), true)));
-
-    changedFiles.sort();
+    const changedFiles = listChangedSourceFiles(BASE_BRANCH, root);
     log(`Changed files:\n${changedFiles.join('\n')}`);
     return changedFiles;
   } catch (error) {
@@ -167,7 +191,14 @@ export function getChangedFiles(BASE_BRANCH, log = console.log) {
   }
 }
 
-let testsFailed = false;
+/**
+ * Absolute path of the Jest binary the CLI invokes directly (no shell, no npx).
+ * @param {string} [root]
+ * @returns {string}
+ */
+export function resolveJestBin(root = process.cwd()) {
+  return path.resolve(root, 'node_modules', 'jest', 'bin', 'jest.js');
+}
 
 function runJest(jestArgs) {
   console.log(`   Jest command: npx jest ${jestArgs.join(' ')}`);
@@ -176,7 +207,7 @@ function runJest(jestArgs) {
   // no npx), with an argument array, so file paths with spaces or special
   // characters can't break the invocation.
   try {
-    const jestBin = path.resolve('node_modules', 'jest', 'bin', 'jest.js');
+    const jestBin = resolveJestBin();
     execFileSync(process.execPath, [jestBin, ...jestArgs], { stdio: 'inherit' });
   } catch (err) {
     // Log and continue so the coverage report still runs and CI can
@@ -184,6 +215,80 @@ function runJest(jestArgs) {
     testsFailed = true;
     console.error('❌ Tests failed:', err.message || err);
   }
+}
+
+/**
+ * Resolves the test files a mode would run, without logging, running Jest, or exiting.
+ * `testsToRun` keeps CLI insertion order (changed tests first, then matches).
+ * Full mode cannot discover related tests without Jest; `testsToRun` is then
+ * only the changed test files, and `jestTargets` is what `--findRelatedTests` receives.
+ * @param {string[]} files
+ * @param {string} mode
+ * @param {number} [depth]
+ * @param {string} [root]
+ */
+export function resolveTestPlan(files, mode, depth = 2, root = process.cwd()) {
+  const { sourceFiles, testFiles } = separateSourceAndTestFiles(files);
+
+  if (mode === 'full') {
+    const jestTargets = [...sourceFiles, ...testFiles];
+    return {
+      mode,
+      depth,
+      sourceFiles,
+      testFiles,
+      mappings: [],
+      testsToRun: [...testFiles],
+      jestTargets,
+      jestArgs: ['--findRelatedTests', '--passWithNoTests', '--coverage', ...jestTargets],
+      delegatedToJest: true
+    };
+  }
+
+  // Fast: naming-convention mapping with a direct-import fallback.
+  // Smart: naming-convention mapping plus a depth-limited reverse-dependency walk.
+  const testFilesToRun = new Set(testFiles);
+  const mappings = [];
+
+  sourceFiles.forEach(sourceFile => {
+    let relatedTests;
+    let matchType;
+
+    if (mode === 'smart') {
+      relatedTests = findRelatedTestFilesBySource(sourceFile, { maxDepth: depth, root });
+      matchType = `naming + import graph, depth ≤ ${depth}`;
+    } else {
+      relatedTests = findTestFilesForSource(sourceFile, root);
+      matchType = 'naming convention';
+
+      if (relatedTests.length === 0) {
+        relatedTests = findTestFilesByImport(sourceFile, root);
+        if (relatedTests.length > 0) {
+          matchType = 'import scan';
+        }
+      }
+    }
+
+    mappings.push({
+      source: sourceFile,
+      tests: [...relatedTests],
+      matchType
+    });
+    relatedTests.forEach(test => testFilesToRun.add(test));
+  });
+
+  const testsToRun = Array.from(testFilesToRun);
+  return {
+    mode,
+    depth,
+    sourceFiles,
+    testFiles,
+    mappings,
+    testsToRun,
+    jestTargets: testsToRun,
+    jestArgs: ['--passWithNoTests', '--coverage', ...testsToRun],
+    delegatedToJest: false
+  };
 }
 
 function runRelatedTests(files, mode, depth = 2) {
@@ -194,8 +299,8 @@ function runRelatedTests(files, mode, depth = 2) {
 
   console.log('🔍 Analyzing changed files for optimal test execution...');
 
-  // Separate source files and test files
-  const { sourceFiles, testFiles } = separateSourceAndTestFiles(files);
+  const plan = resolveTestPlan(files, mode, depth);
+  const { sourceFiles, testFiles } = plan;
 
   console.log(`\n📊 Changed files breakdown:`);
   console.log(`   Source files: ${sourceFiles.length}`);
@@ -211,7 +316,7 @@ function runRelatedTests(files, mode, depth = 2) {
 
   // Full mode delegates discovery to Jest, so pass the changed files themselves.
   if (mode === 'full') {
-    const jestTargets = [...sourceFiles, ...testFiles];
+    const jestTargets = plan.jestTargets;
 
     if (jestTargets.length === 0) {
       console.log('\n⚠️  No changed source or test files found to run.');
@@ -224,42 +329,19 @@ function runRelatedTests(files, mode, depth = 2) {
     console.log('   Files passed to Jest:');
     jestTargets.forEach(file => console.log(`     - ${file}`));
 
-    runJest(['--findRelatedTests', '--passWithNoTests', '--coverage', ...jestTargets]);
+    runJest(plan.jestArgs);
     return;
   }
 
-  // Fast: naming-convention mapping with a direct-import fallback.
-  // Smart: naming-convention mapping plus a depth-limited reverse-dependency walk.
-  const testFilesToRun = new Set(testFiles);
-
-  sourceFiles.forEach(sourceFile => {
-    let relatedTests;
-    let matchType;
-
-    if (mode === 'smart') {
-      relatedTests = findRelatedTestFilesBySource(sourceFile, { maxDepth: depth });
-      matchType = `naming + import graph, depth ≤ ${depth}`;
+  plan.mappings.forEach(({ source, tests, matchType }) => {
+    if (tests.length > 0) {
+      console.log(`   ✓ ${source} → ${tests.length} test file(s) (${matchType})`);
     } else {
-      relatedTests = findTestFilesForSource(sourceFile);
-      matchType = 'naming convention';
-
-      if (relatedTests.length === 0) {
-        relatedTests = findTestFilesByImport(sourceFile);
-        if (relatedTests.length > 0) {
-          matchType = 'import scan';
-        }
-      }
-    }
-
-    if (relatedTests.length > 0) {
-      console.log(`   ✓ ${sourceFile} → ${relatedTests.length} test file(s) (${matchType})`);
-      relatedTests.forEach(test => testFilesToRun.add(test));
-    } else {
-      console.log(`   ⚠ ${sourceFile} → No test file found`);
+      console.log(`   ⚠ ${source} → No test file found`);
     }
   });
 
-  const finalTestFiles = Array.from(testFilesToRun);
+  const finalTestFiles = plan.testsToRun;
 
   if (finalTestFiles.length === 0) {
     console.log('\n⚠️  No test files found to run.');
@@ -281,14 +363,14 @@ function runRelatedTests(files, mode, depth = 2) {
     console.log(`   Source files detected: ${sourceFiles.length}`);
   }
 
-  runJest(['--passWithNoTests', '--coverage', ...finalTestFiles]);
+  runJest(plan.jestArgs);
 }
 
 /**
  * Dry run: only resolve the test files that the selected mode would run,
  * then print one path per line and exit without running Jest or checking
  * coverage. The stdout is clean enough for another tool to consume:
- *   node index.js --dry-run true --files src/a.js --base origin/main
+ *   node index.js --dryRun true --files src/a.js --base origin/main
  * Errors still go to stderr via the catch in main().
  *
  * @param {string[]} files - Changed source and test files (repo-relative)
@@ -302,40 +384,28 @@ export function dryRun(files, mode, depth = 2) {
     exit(0);
   }
 
-  const { sourceFiles, testFiles } = separateSourceAndTestFiles(files);
+  const plan = resolveTestPlan(files, mode, depth);
 
   // Full mode delegates discovery to Jest; without running it, the only
-  // guaranteed output is the changed files themselves.
+  // guaranteed output is the changed test files themselves.
   if (mode === 'full') {
     // Keep stdout clean (one path per line) for other tools; warn on stderr.
     console.error('⚠️  full mode relies on Jest --findRelatedTests; --dry-run prints only the changed test files.');
-    testFiles.forEach(file => console.log(file));
+    plan.testFiles.forEach(file => console.log(file));
     exit(0);
   }
 
-  const testFilesToRun = new Set(testFiles);
-
-  sourceFiles.forEach(sourceFile => {
-    // Same matching rules as the real run (see runRelatedTests), just no Jest.
-    const relatedTests = mode === 'smart'
-      ? findRelatedTestFilesBySource(sourceFile, { maxDepth: depth })
-      : findTestFilesForSource(sourceFile);
-
-    if (mode === 'fast' && relatedTests.length === 0) {
-      relatedTests.push(...findTestFilesByImport(sourceFile));
-    }
-
-    relatedTests.forEach(test => testFilesToRun.add(test));
-  });
-
-  Array.from(testFilesToRun).sort().forEach(file => console.log(file));
+  [...plan.testsToRun].sort().forEach(file => console.log(file));
   exit(0);
 }
 
-function getChangedLines(filePath, BASE_BRANCH) {
+export function getChangedLines(filePath, BASE_BRANCH, root = process.cwd()) {
   // Argument array + `--` separator keeps file paths (and the ref, already
   // validated in verifyBaseBranchExists) out of any shell interpretation.
-  const diff = execFileSync('git', ['diff', '-U0', BASE_BRANCH, '--', filePath], { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+  const diff = execFileSync('git', ['diff', '-U0', BASE_BRANCH, '--', filePath], {
+    cwd: root,
+    stdio: ['ignore', 'pipe', 'ignore']
+  }).toString();
   const lines = [];
 
   const hunkRegex = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm;
@@ -351,14 +421,16 @@ function getChangedLines(filePath, BASE_BRANCH) {
   return lines;
 }
 
-export function parseLcov(LCOV_PATH) {
+export function parseLcov(LCOV_PATH, root = process.cwd()) {
   const lcovRaw = fs.readFileSync(LCOV_PATH, 'utf8');
   const files = {};
   let currentFile = null;
 
   lcovRaw.split('\n').forEach(line => {
     if (line.startsWith('SF:')) {
-      currentFile = path.resolve(line.substring(3).trim());
+      // Absolute SF paths stay absolute. Relative ones resolve against `root`,
+      // which is the process cwd for the CLI.
+      currentFile = path.resolve(root, line.substring(3).trim());
       files[currentFile] = {
         coverableLines: new Set(),
         uncoveredLines: new Set()
@@ -475,6 +547,107 @@ export function formatMissedLinesSummary(uncoveredByFile) {
   ];
 }
 
+/**
+ * Reads lcov and keeps only source files that participate in the coverage check.
+ * Throws an error with code LCOV_NOT_FOUND when the report file is missing.
+ * @param {string[]} changedFiles
+ * @param {string} lcovPath
+ * @param {string} [root]
+ */
+export function loadCoverageIndex(changedFiles, lcovPath, root = process.cwd()) {
+  const resolvedLcov = path.resolve(root, lcovPath);
+  if (!fs.existsSync(resolvedLcov)) {
+    const error = new Error('lcov.info not found. Make sure coverage ran correctly.');
+    error.code = 'LCOV_NOT_FOUND';
+    error.lcovPath = resolvedLcov;
+    throw error;
+  }
+
+  return {
+    lcovPath: resolvedLcov,
+    coverageByFile: parseLcov(resolvedLcov, root),
+    relevantFiles: getJsOnlyFiles(changedFiles)
+  };
+}
+
+/**
+ * Classifies one file's changed lines against an lcov index.
+ * Line numbers come from `git diff -U0 <base> -- <file>` (working tree vs the ref).
+ * @param {string} relPath
+ * @param {Record<string, {coverableLines: Set<number>, uncoveredLines: Set<number>}>} coverageByFile
+ * @param {string} baseBranch
+ * @param {string} [root]
+ */
+export function analyzeChangedFile(relPath, coverageByFile, baseBranch, root = process.cwd()) {
+  const absolutePath = path.resolve(root, relPath);
+  const changedLines = getChangedLines(relPath, baseBranch, root);
+  const fileCoverage = coverageByFile[absolutePath];
+  const { coveredLines, uncoveredLines } = classifyChangedLineCoverage(changedLines, fileCoverage);
+  const trackedChangedLines = coveredLines.length + uncoveredLines.length;
+
+  return {
+    filePath: relPath,
+    absolutePath,
+    changedLines,
+    coveredLines,
+    uncoveredLines,
+    trackedChangedLines,
+    hasCoverageInfo: Boolean(fileCoverage),
+    fileCoverage: trackedChangedLines > 0
+      ? `${((coveredLines.length / trackedChangedLines) * 100).toFixed(2)}%`
+      : '-',
+    status: uncoveredLines.length > 0 ? '🚨' : trackedChangedLines > 0 ? '✅' : 'ℹ️'
+  };
+}
+
+/**
+ * Totals coverable changed lines the same way the CLI threshold does.
+ * Files with an empty diff are ignored. Lines absent from lcov are not counted.
+ * @param {ReturnType<typeof analyzeChangedFile>[]} fileResults
+ * @param {number} coverageLimit
+ */
+export function summarizeChangedLineResults(fileResults, coverageLimit) {
+  let totalChanged = 0;
+  let totalNotCovered = 0;
+  const uncoveredByFile = [];
+  const rows = [];
+
+  fileResults.forEach(result => {
+    if (result.changedLines.length === 0) return;
+
+    totalChanged += result.trackedChangedLines;
+    totalNotCovered += result.uncoveredLines.length;
+
+    if (result.uncoveredLines.length > 0) {
+      uncoveredByFile.push({
+        filePath: result.filePath,
+        lines: result.uncoveredLines
+      });
+    }
+
+    rows.push({
+      filePath: result.filePath,
+      covered: result.coveredLines.length,
+      uncovered: result.uncoveredLines.length,
+      trackedChangedLines: result.trackedChangedLines,
+      fileCoverage: result.fileCoverage,
+      status: result.status
+    });
+  });
+
+  const summary = totalChanged > 0
+    ? summarizeCoverageResult(totalChanged, totalNotCovered, coverageLimit)
+    : { overallCoverage: null, passed: true, icon: '✅' };
+
+  return {
+    totalChanged,
+    totalNotCovered,
+    uncoveredByFile,
+    rows,
+    ...summary
+  };
+}
+
 function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED, CI = false, CI_REPORT_PATH) {
   if (!fs.existsSync(LCOV_PATH)) {
     console.error('❌ lcov.info not found. Make sure coverage ran correctly.');
@@ -489,11 +662,9 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
     console.log(`\n🔍 Checking coverage of changed lines vs branch: ${BASE_BRANCH}\n`);
   }
 
-  const coverageByFile = parseLcov(LCOV_PATH);
+  const { coverageByFile, relevantFiles } = loadCoverageIndex(changedFiles, LCOV_PATH);
 
-  changedFiles = getJsOnlyFiles(changedFiles);
-
-  if (changedFiles.length === 0) {
+  if (relevantFiles.length === 0) {
     if (!CI) {
       console.log('✅ No relevant files found for coverage check.');
     }
@@ -501,70 +672,39 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
   }
 
   if (!CI) {
-    console.log('Files with changed lines:', changedFiles.join('\n'));
+    console.log('Files with changed lines:', relevantFiles.join('\n'));
   }
 
-  let totalChanged = 0;
-  let totalNotCovered = 0;
-  const uncoveredByFile = [];
-  const rows = [];
+  const fileResults = [];
 
-  changedFiles.forEach(relPath => {
-    const absPath = path.resolve(relPath);
-    const addedLines = getChangedLines(relPath, BASE_BRANCH);
+  relevantFiles.forEach(relPath => {
+    const result = analyzeChangedFile(relPath, coverageByFile, BASE_BRANCH);
+    fileResults.push(result);
 
-    if (addedLines.length === 0) {
+    if (result.changedLines.length === 0) {
       if (!CI) {
-        console.log(`ℹ️  ${absPath} - No changed lines detected.`);
+        console.log(`ℹ️  ${result.absolutePath} - No changed lines detected.`);
       }
       return;
     }
 
-    const fileCoverage = coverageByFile[absPath];
-    if (!fileCoverage && !CI) {
-      console.log(`⚠️  No coverage info for: ${absPath}`);
+    if (!result.hasCoverageInfo && !CI) {
+      console.log(`⚠️  No coverage info for: ${result.absolutePath}`);
     }
-
-    const {
-      coveredLines,
-      uncoveredLines
-    } = classifyChangedLineCoverage(addedLines, fileCoverage);
-    const trackedChangedLines = coveredLines.length + uncoveredLines.length;
-
-    totalChanged += trackedChangedLines;
-    totalNotCovered += uncoveredLines.length;
-
-    if (uncoveredLines.length > 0) {
-      uncoveredByFile.push({
-        filePath: relPath,
-        lines: uncoveredLines
-      });
-    }
-
-    rows.push({
-      filePath: relPath,
-      covered: coveredLines.length,
-      uncovered: uncoveredLines.length,
-      trackedChangedLines,
-      fileCoverage: trackedChangedLines > 0
-        ? `${((coveredLines.length / trackedChangedLines) * 100).toFixed(2)}%`
-        : '-',
-      status: uncoveredLines.length > 0 ? '🚨' : trackedChangedLines > 0 ? '✅' : 'ℹ️'
-    });
 
     if (!CI) {
-      if (uncoveredLines.length > 0) {
-        console.log(`🚨 ${absPath} - Uncovered changed lines: [${uncoveredLines.join(', ')}]`);
-      } else if (trackedChangedLines > 0) {
-        console.log(`✅ ${absPath} - All changed lines are covered`);
+      if (result.uncoveredLines.length > 0) {
+        console.log(`🚨 ${result.absolutePath} - Uncovered changed lines: [${result.uncoveredLines.join(', ')}]`);
+      } else if (result.trackedChangedLines > 0) {
+        console.log(`✅ ${result.absolutePath} - All changed lines are covered`);
       }
 
-      console.log(`   Total coverable changed lines: ${trackedChangedLines}, Covered: ${coveredLines.length}, Uncovered: ${uncoveredLines.length}`)
-      if (SHOW_COVERED && coveredLines.length > 0) {
-        console.log(`   Covered lines: [${coveredLines.join(', ')}]`);
+      console.log(`   Total coverable changed lines: ${result.trackedChangedLines}, Covered: ${result.coveredLines.length}, Uncovered: ${result.uncoveredLines.length}`)
+      if (SHOW_COVERED && result.coveredLines.length > 0) {
+        console.log(`   Covered lines: [${result.coveredLines.join(', ')}]`);
       }
-      if (trackedChangedLines > 0) {
-        console.log(`   Coverage for changed lines: ${((coveredLines.length / trackedChangedLines) * 100).toFixed(2)}%`);
+      if (result.trackedChangedLines > 0) {
+        console.log(`   Coverage for changed lines: ${((result.coveredLines.length / result.trackedChangedLines) * 100).toFixed(2)}%`);
       } else {
         console.log(`   No coverable lines in this file's changed lines (e.g., imports, comments).`);
       }
@@ -572,9 +712,15 @@ function reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVER
   });
 
   // Cumulative coverage check
-  const { overallCoverage, passed, icon } = totalChanged > 0
-    ? summarizeCoverageResult(totalChanged, totalNotCovered, COVERAGE_LIMIT)
-    : { overallCoverage: null, passed: true, icon: '✅' };
+  const {
+    overallCoverage,
+    passed,
+    icon,
+    totalChanged,
+    totalNotCovered,
+    rows,
+    uncoveredByFile
+  } = summarizeChangedLineResults(fileResults, COVERAGE_LIMIT);
 
   if (CI) {
     const report = buildMarkdownCoverageReport(rows, {

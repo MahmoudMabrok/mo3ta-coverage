@@ -1,24 +1,55 @@
 import { execFileSync } from 'child_process';
 import { exit } from 'process';
 
-export function verifyGitRepoExists() {
+/**
+ * Checks that `cwd` is inside a git work tree.
+ * Returns a result instead of exiting so callers (the CLI and the MCP server)
+ * can decide how to surface the failure.
+ * @param {string} [cwd]
+ * @returns {{ok: true} | {ok: false, message: string}}
+ */
+export function checkGitRepository(cwd = process.cwd()) {
   try {
-    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { stdio: 'ignore' });
+    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { stdio: 'ignore', cwd });
+    return { ok: true };
   } catch (err) {
-    console.error(`❌ Not a git repository. Please run this tool inside a git repo. ${err.message}`);
+    return {
+      ok: false,
+      message: `Not a git repository. Please run this tool inside a git repo. ${err.message}`
+    };
+  }
+}
+
+export function verifyGitRepoExists(cwd = process.cwd()) {
+  const result = checkGitRepository(cwd);
+  if (!result.ok) {
+    console.error(`❌ ${result.message}`);
     exit(1);
   }
 }
 
-export function verifyBaseBranchExists(BASE_BRANCH) {
+/**
+ * Checks that `baseRef` resolves to a commit. The ref is passed as one
+ * argument (never through a shell) and git `--verify` rejects option-like
+ * values such as `--upload-pack=...`.
+ * @param {string} baseRef
+ * @param {string} [cwd]
+ * @returns {{ok: true} | {ok: false, message: string}}
+ */
+export function checkBaseRef(baseRef, cwd = process.cwd()) {
+  const message = `Base branch "${baseRef}" does not exist or is invalid. try git fetch to update your local branches.`;
   try {
-    // Accept any valid git ref (branch, tag, or revision like origin/main, HEAD~1).
-    // Git is invoked with an argument array (never through a shell) and the value
-    // is checked with --verify, so a hostile value such as `--upload-pack=cmd`
-    // or `a; rm -rf ~` is rejected by git as an invalid ref instead of running.
-    execFileSync('git', ['rev-parse', '--verify', '--quiet', `${BASE_BRANCH}^{commit}`], { stdio: 'ignore' });
-  } catch (err) {
-    console.error(`❌ Base branch "${BASE_BRANCH}" does not exist or is invalid. try git fetch to update your local branches.`);
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', `${baseRef}^{commit}`], { stdio: 'ignore', cwd });
+    return { ok: true };
+  } catch {
+    return { ok: false, message };
+  }
+}
+
+export function verifyBaseBranchExists(BASE_BRANCH, cwd = process.cwd()) {
+  const result = checkBaseRef(BASE_BRANCH, cwd);
+  if (!result.ok) {
+    console.error(`❌ ${result.message}`);
     exit(1);
   }
 }

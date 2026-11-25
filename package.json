@@ -2,12 +2,15 @@
   "name": "mo3ta-coverage",
   "version": "1.3.0",
   "description": "Run tests and report uncovered changed lines in a PR",
+  "homepage": "https://mo3ta.top/mo3ta-coverage/",
   "main": "index.js",
   "bin": {
-    "mo3ta-coverage": "./index.js"
+    "mo3ta-coverage": "./index.js",
+    "mo3ta-coverage-mcp": "./mcp/server.js"
   },
   "scripts": {
-    "test": "jest --coverage",
+    "test": "jest --coverage && node --test --test-concurrency=1 mcp/server.test.js",
+    "mcp": "node mcp/server.js",
     "build": "babel index.js -o dist/index.js"
   },
   "author": "Mahmoud Mabrok",
@@ -21,7 +24,8 @@
     "ci",
     "code-coverage",
     "pull-request",
-    "diff"
+    "diff",
+    "mcp"
   ],
   "repository": {
     "type": "git",
@@ -37,7 +41,9 @@
     "jest": "30.5.2"
   },
   "dependencies": {
-    "commander": "15.1.0"
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "commander": "15.1.0",
+    "zod": "4.6.7"
   },
   "overrides": {
     "glob": "14.0.6",
