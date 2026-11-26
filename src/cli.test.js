@@ -6,10 +6,12 @@ import {
   buildMarkdownCoverageReport,
   classifyChangedLineCoverage,
   dryRun,
+  filterTestFiles,
   formatMissedLinesSummary,
   getChangedFiles,
   getExplicitFiles,
   normalizeExplicitFiles,
+  parseFilter,
   parseJestArgs,
   parseLcov,
   readExplicitFilesFromFile,
@@ -264,6 +266,163 @@ describe('parseJestArgs', () => {
   });
 });
 
+describe('parseFilter', () => {
+  it('returns null for no input', () => {
+    expect(parseFilter()).toBeNull();
+    expect(parseFilter(null)).toBeNull();
+    expect(parseFilter('')).toBeNull();
+    expect(parseFilter('   ')).toBeNull();
+  });
+
+  it('compiles a string pattern into a RegExp', () => {
+    const filter = parseFilter('src/__tests__/login');
+    expect(filter).toBeInstanceOf(RegExp);
+    expect(filter.test('src/__tests__/login.spec.js')).toBe(true);
+    expect(filter.test('src/auth/logout.spec.js')).toBe(false);
+  });
+
+  it('trims surrounding whitespace from the pattern', () => {
+    expect(parseFilter('  login  ').source).toBe('login');
+  });
+
+  it('accepts a RegExp input and drops global/sticky flags', () => {
+    const filter = parseFilter(/login/g);
+    expect(filter.source).toBe('login');
+    expect(filter.flags).toBe('');
+    // Repeating .test() must not depend on lastIndex.
+    expect(filter.test('a/login.spec.js')).toBe(true);
+    expect(filter.test('a/login.spec.js')).toBe(true);
+  });
+
+  it('throws an INVALID_FILTER error for a malformed pattern', () => {
+    expect(() => parseFilter('(unclosed')).toThrow(/Invalid filter regex/);
+    try {
+      parseFilter('(unclosed');
+    } catch (error) {
+      expect(error.code).toBe('INVALID_FILTER');
+    }
+  });
+});
+
+describe('filterTestFiles', () => {
+  it('returns a copy of the input when no filter is given', () => {
+    const files = ['src/a.test.js', 'src/b.test.js'];
+    const result = filterTestFiles(files);
+    expect(result).toEqual(files);
+    expect(result).not.toBe(files);
+  });
+
+  it('keeps only the paths that match the regex', () => {
+    const files = ['src/__tests__/login.spec.js', 'src/auth/logout.spec.js', 'src/login.tsx.test.ts'];
+    const result = filterTestFiles(files, 'login');
+    expect(result).toEqual(['src/__tests__/login.spec.js', 'src/login.tsx.test.ts']);
+  });
+
+  it('supports a RegExp instance as the filter', () => {
+    const files = ['src/foo.test.js', 'src/bar.test.js'];
+    const result = filterTestFiles(files, /foo/);
+    expect(result).toEqual(['src/foo.test.js']);
+  });
+});
+
+describe('resolveTestPlan spec filter', () => {
+  let tempDir;
+  let originalCwd;
+
+  beforeEach(() => {
+    originalCwd = process.cwd();
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mo3ta-filter-plan-'));
+    fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tempDir, 'src', 'example.js'), 'export const example = 1;\n');
+    fs.writeFileSync(
+      path.join(tempDir, 'src', 'example.test.js'),
+      "import { example } from './example';\n\ntest('naming match', () => expect(example).toBe(1));\n"
+    );
+    fs.mkdirSync(path.join(tempDir, 'specs'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempDir, 'specs', 'custom-name.spec.js'),
+      "import { example } from '../src/example';\n\ntest('import match', () => expect(example).toBe(1));\n"
+    );
+    process.chdir(tempDir);
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('filters selected tests and keeps the pre-filter list for validation', () => {
+    const plan = resolveTestPlan(['src/example.js'], 'smart', 2, tempDir, [], 'specs\\/');
+
+    expect(plan.filter).toBe('specs\\/');
+    expect(plan.allTestsToRun).toEqual(['specs/custom-name.spec.js', 'src/example.test.js']);
+    expect(plan.testsToRun).toEqual(['specs/custom-name.spec.js']);
+    expect(plan.jestTargets).toEqual(['specs/custom-name.spec.js']);
+    expect(plan.jestArgs).toEqual(['--passWithNoTests', '--coverage', 'specs/custom-name.spec.js']);
+  });
+
+  it('removes test files when the filter matches none', () => {
+    const plan = resolveTestPlan(['src/example.js'], 'smart', 2, tempDir, [], 'not-a-match');
+
+    expect(plan.allTestsToRun).toEqual(['specs/custom-name.spec.js', 'src/example.test.js']);
+    expect(plan.testsToRun).toEqual([]);
+    expect(plan.jestArgs).toEqual(['--passWithNoTests', '--coverage']);
+  });
+
+  it('keeps the per-source "allTests" for the validation log when the filter drops everything', () => {
+    const plan = resolveTestPlan(['src/example.js'], 'smart', 2, tempDir, [], 'not-a-match');
+
+    plan.mappings.forEach(mapping => {
+      expect(mapping.tests).toEqual([]);
+      expect(mapping.allTests).toEqual(['specs/custom-name.spec.js', 'src/example.test.js']);
+    });
+  });
+
+  it('leaves the plan untouched when no filter is given', () => {
+    const plan = resolveTestPlan(['src/example.js'], 'smart', 2, tempDir);
+
+    expect(plan.filter).toBeNull();
+    expect(plan.allTestsToRun).toEqual(['specs/custom-name.spec.js', 'src/example.test.js']);
+    expect(plan.testsToRun).toEqual(['specs/custom-name.spec.js', 'src/example.test.js']);
+  });
+
+  it('forwards the filter to Jest via --testPathPatterns in full mode', () => {
+    const plan = resolveTestPlan(
+      ['src/example.js', 'src/example.test.js'],
+      'full',
+      2,
+      tempDir,
+      [],
+      'example'
+    );
+
+    expect(plan.delegatedToJest).toBe(true);
+    expect(plan.allTestsToRun).toEqual(['src/example.test.js']);
+    expect(plan.testsToRun).toEqual(['src/example.test.js']);
+    expect(plan.jestTargets).toEqual(['src/example.js', 'src/example.test.js']);
+    expect(plan.jestArgs).toContain('--findRelatedTests');
+    expect(plan.jestArgs).toContain('--testPathPatterns');
+    expect(plan.jestArgs).toContain('example');
+  });
+
+  it('does not duplicate a Jest path pattern the caller already set in full mode', () => {
+    const plan = resolveTestPlan(
+      ['src/example.js'],
+      'full',
+      2,
+      tempDir,
+      ['--testPathPatterns=login'],
+      'example'
+    );
+
+    expect(plan.jestArgs).toContain('--testPathPatterns=login');
+    expect(plan.jestArgs).not.toContain('--testPathPatterns');
+    expect(plan.jestArgs.filter(arg => arg.startsWith('--testPathPatterns'))).toEqual(
+      ['--testPathPatterns=login']
+    );
+  });
+});
+
 describe('resolveTestPlan jest flags', () => {
   it('appends extra flags to fast mode jestArgs after the test files', () => {
     const plan = resolveTestPlan(['src/example.test.js'], 'fast', 2, process.cwd(), ['--maxWorkers=2', '--silent']);
@@ -426,5 +585,25 @@ describe('dryRun', () => {
 
     expect(stdoutLines).toEqual(['src/example.test.js']);
     expect(stderrLines.some(line => line.includes('--findRelatedTests'))).toBe(true);
+  });
+
+  it('prints the before/after filter log on stderr and only filtered paths on stdout', () => {
+    expect(() => dryRun(['src/example.js'], 'smart', 2, 'example\\.test\\.js$')).toThrow(/^exit:/);
+
+    // The changed file's naming-match test survives the filter; the import-scan
+    // spec does not.
+    expect(stdoutLines).toEqual(['src/example.test.js']);
+    expect(stderrLines.some(line => line.includes('Filter regex'))).toBe(true);
+    expect(stderrLines.some(line => line.includes('specs/custom-name.spec.js'))).toBe(true);
+    expect(stderrLines.some(line => line.includes('src/example.test.js'))).toBe(true);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('prints nothing on stdout when the filter matches no test file', () => {
+    expect(() => dryRun(['src/example.js'], 'smart', 2, 'zzz-no-match')).toThrow(/^exit:/);
+
+    expect(stdoutLines).toEqual([]);
+    expect(stderrLines.some(line => line.includes('after filter (0)'))).toBe(true);
+    expect(exitSpy).toHaveBeenCalledWith(0);
   });
 });

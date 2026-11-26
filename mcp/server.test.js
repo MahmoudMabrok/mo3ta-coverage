@@ -117,6 +117,34 @@ test('list and map tools return changed files and their tests', async () => {
   }
 });
 
+test('map_related_tests narrows the selected specs with a filter regex', async () => {
+  const root = initFixture();
+  fs.writeFileSync(path.join(root, 'src', 'other.test.js'), [
+    "const { add } = require('./math');",
+    "test('other', () => {",
+    '  expect(add(1, 1)).toBe(2);',
+    '});',
+    ''
+  ].join('\n'));
+  git(root, 'git add src/other.test.js && git commit -q -m other');
+  const session = await connect();
+  try {
+    const mapped = await session.client.callTool({
+      name: 'map_related_tests',
+      arguments: { root, base: 'main', mode: 'fast', filter: 'math', useConfig: false }
+    });
+    const data = dataOf(mapped);
+    assert.equal(mapped.isError, false);
+    assert.equal(data.filter, 'math');
+    assert.deepEqual(data.testsToRun, ['src/math.test.js']);
+    assert.ok(data.allTestsToRun.includes('src/other.test.js'));
+    assert.match(data.summary, /Filter \/math\/ kept 1 of 2/);
+  } finally {
+    await session.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('turns a missing repo and a bad base ref into tool errors', async () => {
   const session = await connect();
   const missing = fs.mkdtempSync(path.join(os.tmpdir(), 'mo3ta-mcp-missing-'));

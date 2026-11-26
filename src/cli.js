@@ -331,6 +331,7 @@ export function resolveTestPlan(files, mode, depth = 2, root = process.cwd(), je
   // Fast: naming-convention mapping with a direct-import fallback.
   // Smart: naming-convention mapping plus a depth-limited reverse-dependency walk.
   const testFilesToRun = new Set(testFiles);
+  const allTestFilesToRun = new Set(testFiles);
   const mappings = [];
 
   sourceFiles.forEach(sourceFile => {
@@ -359,10 +360,11 @@ export function resolveTestPlan(files, mode, depth = 2, root = process.cwd(), je
       allTests: [...relatedTests],
       matchType
     });
+    relatedTests.forEach(test => allTestFilesToRun.add(test));
     filteredTests.forEach(test => testFilesToRun.add(test));
   });
 
-  const allTestsToRun = Array.from(testFilesToRun);
+  const allTestsToRun = Array.from(allTestFilesToRun);
   const testsToRun = filterTestFiles(allTestsToRun, filterRegex);
   return {
     mode,
@@ -492,30 +494,36 @@ function runRelatedTests(files, mode, depth = 2, jestArgs = [], filter = null) {
  * then print one path per line and exit without running Jest or checking
  * coverage. The stdout is clean enough for another tool to consume:
  *   node index.js --dryRun true --files src/a.js --base origin/main
+ * When a filter is given, the before/after filter log goes to stderr so
+ * stdout stays a clean one-path-per-line list.
  * Errors still go to stderr via the catch in main().
  *
  * @param {string[]} files - Changed source and test files (repo-relative)
  * @param {string} mode - Execution mode (fast, smart, or full)
  * @param {number} depth - Max reverse-dependency depth for smart mode
+ * @param {string|RegExp|null} [filter] regex matched against the final test paths
  */
-export function dryRun(files, mode, depth = 2) {
+export function dryRun(files, mode, depth = 2, filter = null) {
   if (files.length === 0) {
     // Keep stdout a clean file list; informational messages go to stderr.
     console.error('✅ No changed source files found.');
     exit(0);
   }
 
-  const plan = resolveTestPlan(files, mode, depth);
+  const plan = resolveTestPlan(files, mode, depth, process.cwd(), [], filter);
+
+  // Filter diagnostics stay on stderr so stdout remains a clean list.
+  logFilteredTestFiles(plan, console.error);
 
   // Full mode delegates discovery to Jest; without running it, the only
   // guaranteed output is the changed test files themselves.
   if (mode === 'full') {
     // Keep stdout clean (one path per line) for other tools; warn on stderr.
     console.error('⚠️  full mode relies on Jest --findRelatedTests; --dry-run prints only the changed test files.');
-    plan.testFiles.forEach(file => console.log(file));
-    exit(0);
   }
 
+  // In full mode testsToRun is the changed test files (already filtered),
+  // which is the same as plan.testFiles when no filter is given.
   [...plan.testsToRun].sort().forEach(file => console.log(file));
   exit(0);
 }

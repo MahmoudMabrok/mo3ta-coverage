@@ -180,6 +180,7 @@ specs that reach the changed file through barrel files. See
 | `--files <files...>` | Scan only these files instead of auto-detecting changed files (space- or comma-separated) | – |
 | `--filesFrom <path>` | Read the file list to scan from a newline-separated file | – |
 | `--jest <value>` | Extra Jest CLI flag passed through to the run, e.g. `--maxWorkers=2`. Repeatable or comma-separated | – |
+| `--filter <regex>` | Regex matched against the final list of selected spec files; only matching test files run. The full and filtered lists are both printed for validation | – |
 | `--ci <bool>` | CI mode: emit results as a markdown table and save it to a file so CI can read it without parsing logs | `false` |
 | `--ciReport <path>` | Where to save the CI markdown table | `coverage/mo3ta-coverage-report.md` |
 | `--dryRun <bool>` | Print the test files that would run (one per line) and stop, without running Jest or the coverage check | `false` |
@@ -244,6 +245,54 @@ mo3ta-coverage config --jest --maxWorkers=2 --jest --silent
 ```
 
 A `--jest` value on the command line overrides the saved list.
+
+## Filtering Spec Files
+
+Pass `--filter` a regular expression. After the mode has selected the test
+files that would run, only the ones that **match** the regex are executed
+(everything else is skipped). The regex is matched against the full
+repo-relative spec path, so it can narrow by directory, project, or name:
+
+```sh
+# Only run specs under the login feature folder
+mo3ta-coverage --base origin/main --filter "src/__tests__/login"
+
+# Only run specs whose name contains "auth"
+mo3ta-coverage --base origin/main --filter "auth"
+
+# Combined with an explicit file list and a dry run to preview
+mo3ta-coverage --files src/a.js,src/b.ts --base main --dryRun true --filter "b"
+```
+
+For validation, the run logs both lists:
+
+```text
+🔎 Filter regex: /src\/__tests__\/login/
+   All test files before filter (5):
+     - src/__tests__/login.spec.js
+     - src/checkout/checkout.spec.js
+     ...
+   Test files after filter (1):
+     - src/__tests__/login.spec.js
+```
+
+If the filter matches nothing, no tests are run and the tool exits 0 with
+that log block, so you can see the candidate list and adjust the pattern.
+
+In `full` mode the filter is also forwarded to Jest as
+`--testPathPatterns`, since Jest discovers the related specs itself. If you
+already set a Jest path pattern via `--jest --testPathPatterns=...`, your own
+pattern wins.
+
+To make the filter the default for a repo, save it with the `config`
+subcommand:
+
+```sh
+mo3ta-coverage config --filter "src/__tests__/login"
+# written to .mo3ta-coverage.json as "filter": "src/__tests__/login"
+```
+
+A `--filter` value on the command line overrides the saved one.
 
 ## CI Mode
 
@@ -352,8 +401,11 @@ mo3ta-coverage config --base origin/main --mode smart --depth 2
 ```
 
 This writes `.mo3ta-coverage.json` in the project root. The `base`, `mode`,
-`depth`, and `jest` (extra Jest flags) defaults are supported. For example,
-`mo3ta-coverage config --jest --maxWorkers=2` saves a default Jest worker cap.
+`depth`, `jest` (extra Jest flags), and `filter` (spec filter regex) defaults
+are supported. For example, `mo3ta-coverage config --jest --maxWorkers=2`
+saves a default Jest worker cap, and
+`mo3ta-coverage config --filter "src/__tests__/login"` saves a default spec
+filter.
 
 ## MCP server
 
@@ -361,7 +413,7 @@ This writes `.mo3ta-coverage.json` in the project root. The `base`, `mode`,
 
 The server is a second bin in this package, `mo3ta-coverage-mcp`, speaking MCP over stdio. It lives here rather than in a separate package so one publish ships it, and so it imports this repo's source directly. The CLI flags, stdout, and exit codes are unchanged; the [GitHub Action](https://github.com/MahmoudMabrok/mo3ta-coverage-action) keeps running `node index.js`.
 
-The server requires Node.js 18 or newer. Each tool takes `root` (the checkout to inspect). When `root` is omitted, Claude Code's `CLAUDE_PROJECT_DIR` is used if it is set, otherwise the server process cwd. `useConfig` defaults to true: `base`, `mode`, `depth`, and `jest` are read from `.mo3ta-coverage.json` when present, and explicit arguments override the file.
+The server requires Node.js 18 or newer. Each tool takes `root` (the checkout to inspect). When `root` is omitted, Claude Code's `CLAUDE_PROJECT_DIR` is used if it is set, otherwise the server process cwd. `useConfig` defaults to true: `base`, `mode`, `depth`, `jest`, and `filter` are read from `.mo3ta-coverage.json` when present, and explicit arguments override the file.
 
 | Tool | Purpose |
 | --- | --- |
@@ -369,7 +421,9 @@ The server requires Node.js 18 or newer. Each tool takes `root` (the checkout to
 | `map_related_tests` | Map those files to the tests `fast`, `smart`, or `full` mode would run. |
 | `check_changed_line_coverage` | Run the changed-line coverage check and return uncovered lines with source text. |
 
-`check_changed_line_coverage` runs the repo's local Jest and writes `coverage/` there, same as the CLI. Jest is killed after `timeoutMs` (default 5 minutes) and only a tail of its output is returned. Pass `runTests: false` to grade an existing `lcov.info` without running tests. Pass `jest` (an array of flags or a comma-separated string, e.g. `["--maxWorkers=4"]`) to forward extra Jest CLI flags. A missed threshold comes back as data (`ok: false` plus the uncovered lines), not a crashed tool. A missing git repo, a bad base ref, a missing Jest install, or a timeout comes back as a tool error with a `code` and a hint.
+`check_changed_line_coverage` runs the repo's local Jest and writes `coverage/` there, same as the CLI. Jest is killed after `timeoutMs` (default 5 minutes) and only a tail of its output is returned. Pass `runTests: false` to grade an existing `lcov.info` without running tests. Pass `jest` (an array of flags or a comma-separated string, e.g. `["--maxWorkers=4"]`) to forward extra Jest CLI flags, and `filter` (a regex) to narrow the final list of selected spec files. A missed threshold comes back as data (`ok: false` plus the uncovered lines), not a crashed tool. A missing git repo, a bad base ref, a missing Jest install, or a timeout comes back as a tool error with a `code` and a hint.
+
+When a `filter` is used, results include `allTestsToRun` (the selected specs before the filter) and `testsToRun` (what matched), so an agent can validate that the regex kept what it expected.
 
 `full` mode still delegates discovery to `jest --findRelatedTests`. `map_related_tests` can only list the changed test files until a check actually runs Jest, matching `--dryRun`.
 

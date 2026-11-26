@@ -373,4 +373,58 @@ describe('programmatic coverage API', () => {
       expect(error.code).toBe('INVALID_LIMIT');
     }
   });
+
+  it('narrowing tests with a filter keeps the pre-filter list for validation', () => {
+    root = initRepo('mo3ta-filter-');
+    writeMathFeature(root);
+
+    const result = mapRelatedTests({
+      root,
+      base: 'main',
+      files: ['src/math.js', 'src/bare.js'],
+      mode: 'smart',
+      filter: 'math',
+      useConfig: false
+    });
+
+    expect(result.filter).toBe('math');
+    expect(result.allTestsToRun).toEqual(expect.arrayContaining([
+      'src/math.test.js',
+      'specs/custom-name.spec.js'
+    ]));
+    expect(result.allTestsToRun).toHaveLength(2);
+    expect(result.testsToRun).toEqual(['src/math.test.js']);
+    expect(result.summary).toContain('Filter /math/ kept 1 of 2 candidate test file(s).');
+  });
+
+  it('accepts a filter default from .mo3ta-coverage.json and overrides it explicitly', () => {
+    root = initRepo('mo3ta-filter-config-');
+    writeMathFeature(root);
+    fs.writeFileSync(path.join(root, '.mo3ta-coverage.json'), JSON.stringify({
+      base: 'main',
+      mode: 'smart',
+      filter: 'specs/'
+    }));
+
+    const fromConfig = mapRelatedTests({ root, files: ['src/math.js'] });
+    expect(fromConfig.filter).toBe('specs\\/');
+    expect(fromConfig.testsToRun).toEqual([]);
+
+    const override = mapRelatedTests({ root, files: ['src/math.js'], filter: 'math' });
+    expect(override.filter).toBe('math');
+    expect(override.testsToRun).toEqual(['src/math.test.js']);
+  });
+
+  it('fails fast on an invalid filter regex before running anything', () => {
+    root = initRepo('mo3ta-bad-filter-');
+    writeMathFeature(root);
+
+    expect(() => mapRelatedTests({ root, base: 'main', files: ['src/math.js'], filter: '(unclosed', useConfig: false })).toThrow(Mo3taError);
+    try {
+      mapRelatedTests({ root, base: 'main', files: ['src/math.js'], filter: '(unclosed', useConfig: false });
+    } catch (error) {
+      expect(error.code).toBe('INVALID_FILTER');
+      expect(error.hint).toMatch(/regular expression/i);
+    }
+  });
 });

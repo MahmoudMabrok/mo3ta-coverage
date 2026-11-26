@@ -62,6 +62,7 @@ program
   .option('--filesFrom <path>', 'Read the list of files to scan from a newline-separated file')
   .addOption(new Option('--jest <value>', 'Extra Jest CLI flag, e.g. --maxWorkers=2 (repeatable or comma-separated)').argParser(collectJest))
   .option('--dryRun <bool>', 'Print the test files that would run (one per line) and exit, without running Jest or the coverage check', false)
+  .option('--filter <regex>', 'Regex matched against the final list of selected spec files; only matching test files run. The full list and the filtered list are both printed so you can validate the filter.')
   .enablePositionalOptions(); // used to allow using same options in subcommands
 
 // Usage help text (printed next to --help)
@@ -75,6 +76,7 @@ $ mo3ta-coverage --dryRun true --files src/a.js,src/b.ts --base main
 $ mo3ta-coverage --mode fast --showCovered true
 $ mo3ta-coverage --mode smart --base origin/main --ci true --ciReport coverage/report.md
 $ mo3ta-coverage --base origin/main --jest --maxWorkers=2 --jest --silent
+$ mo3ta-coverage --base origin/main --filter "src/__tests__/login"
 $ mo3ta-coverage config --mode smart --depth 2
 $ mo3ta-coverage --version
 
@@ -93,6 +95,7 @@ const configCommand = program
   .option('--mode <mode>', 'Set default mode (fast/smart/full)')
   .option('--depth <number>', 'Set default smart-mode depth (1-10)')
   .addOption(new Option('--jest <value>', 'Set default extra Jest CLI flag, e.g. --maxWorkers=2 (repeatable or comma-separated)').argParser(collectJest))
+  .option('--filter <regex>', 'Set default spec filter regex matched against the final selected spec files')
   .action((opts) => {
     let config = readConfig();
 
@@ -126,6 +129,12 @@ const configCommand = program
       config.depth = normalizedDepth;
       updated = true;
       console.log(`Default smart-mode depth set to: ${config.depth}`);
+    }
+
+    if (configCommand.getOptionValueSource('filter') === 'cli') {
+      config.filter = opts.filter;
+      updated = true;
+      console.log(`Default spec filter set to: ${opts.filter}`);
     }
 
     if (configCommand.getOptionValueSource('jest') === 'cli') {
@@ -165,6 +174,10 @@ program.action((opts) => {
 
   if (!jestFromCli && config.jest !== undefined && config.jest !== null) {
     options.jest = config.jest;
+  }
+
+  if (!options.filter && config.filter) {
+    options.filter = config.filter;
   }
 
   options.mode = String(options.mode || 'smart').toLowerCase();

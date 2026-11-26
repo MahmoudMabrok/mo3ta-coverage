@@ -42,6 +42,62 @@ describe('CLI process behavior', () => {
     expect(result.stdout).toContain('--jest <value>');
   });
 
+  it('lists the --filter option in help', () => {
+    const result = runCli(root, ['--help']);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('--filter <regex>');
+  });
+
+  it('keeps only matching spec files in a dry run and logs both lists', () => {
+    git(root, 'git init -b main -q');
+    git(root, 'git config user.email test@example.com');
+    git(root, 'git config user.name Test');
+    fs.mkdirSync(path.join(root, 'src'));
+    fs.writeFileSync(path.join(root, 'src', 'a.js'), 'module.exports = 1;\n');
+    fs.writeFileSync(path.join(root, 'src', 'a.test.js'), 'test("a", () => expect(1).toBe(1));\n');
+    git(root, 'git add -A && git commit -q -m init');
+
+    const result = runCli(root, ['--dryRun', 'true', '--files', 'src/a.js', '--base', 'main', '--mode', 'fast', '--filter', 'does-not-match']);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('Filter regex');
+    expect(result.stderr).toContain('src/a.test.js');
+    expect(result.stderr).toContain('after filter (0)');
+  });
+
+  it('runs only the matching spec in a real dry run and exits 0', () => {
+    git(root, 'git init -b main -q');
+    git(root, 'git config user.email test@example.com');
+    git(root, 'git config user.name Test');
+    fs.mkdirSync(path.join(root, 'src'));
+    fs.writeFileSync(path.join(root, 'src', 'a.js'), 'module.exports = 1;\n');
+    fs.writeFileSync(path.join(root, 'src', 'a.test.js'), 'test("a", () => expect(1).toBe(1));\n');
+    git(root, 'git add -A && git commit -q -m init');
+
+    const result = runCli(root, ['--dryRun', 'true', '--files', 'src/a.js', '--base', 'main', '--mode', 'fast', '--filter', 'a\\.test\\.js']);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe('src/a.test.js');
+    expect(result.stderr).toContain('before filter (1)');
+    expect(result.stderr).toContain('after filter (1)');
+  });
+
+  it('exits 1 with a clear message when the filter regex is invalid', () => {
+    git(root, 'git init -b main -q');
+    git(root, 'git config user.email test@example.com');
+    git(root, 'git config user.name Test');
+    fs.mkdirSync(path.join(root, 'src'));
+    fs.writeFileSync(path.join(root, 'src', 'a.js'), 'module.exports = 1;\n');
+    git(root, 'git add -A && git commit -q -m init');
+
+    const result = runCli(root, ['--files', 'src/a.js', '--base', 'main', '--mode', 'fast', '--filter', '(unclosed']);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Invalid filter regex "(unclosed"');
+  });
+
   it('shows the provided jest flags in the options summary', () => {
     git(root, 'git init -b main -q');
     git(root, 'git config user.email test@example.com');
