@@ -27,14 +27,18 @@ const depthField = z.union([z.number(), z.string()]).optional().describe(
 const jestArgsField = z.union([z.array(z.string()), z.string()]).optional().describe(
   'Extra Jest CLI flags to pass through, e.g. ["--maxWorkers=4","--silent"] or "--maxWorkers=4,--silent". Appended to the tool\'s own Jest arguments.'
 );
+const filterField = z.string().optional().describe(
+  'Regular expression matched against the final list of selected spec files; only matching test paths run. Example: "src/__tests__/login". Reads "filter" from .mo3ta-coverage.json when not passed explicitly.'
+);
 const useConfigField = z.boolean().optional().describe(
-  'Read base, mode, and depth defaults from .mo3ta-coverage.json in the repo. Default true. Explicit arguments override the file. Set false to ignore a broken config.'
+  'Read base, mode, depth, jest, and filter defaults from .mo3ta-coverage.json in the repo. Default true. Explicit arguments override the file. Set false to ignore a broken config.'
 );
 
 const INSTRUCTIONS = [
   'mo3ta-coverage checks coverage of lines changed versus a base ref.',
   'Use list_changed_files to see changed JS/TS files, map_related_tests to see which tests would run, and check_changed_line_coverage to get the uncovered changed lines to write tests for.',
   'check_changed_line_coverage runs the repo\'s local Jest and writes coverage/ in that repo. Pass runTests: false to read an existing lcov file instead.',
+  'Pass a filter (a regex) to map_related_tests or check_changed_line_coverage to narrow the final list of selected spec files to the matching paths. The result includes allTestsToRun (before the filter) and testsToRun (after) so you can validate the match.',
   'A result with ok: false and uncovered lines is a coverage gap, not a crashed tool. Operational problems (not a git repo, bad base ref, Jest missing) come back as tool errors with a code and a hint.'
 ].join(' ');
 
@@ -106,7 +110,7 @@ export function createServer({ version = '0.0.0' } = {}) {
     'map_related_tests',
     {
       title: 'Map related tests',
-      description: 'Map changed source files to the test files fast, smart, or full mode would run. smart (default) uses filenames plus a depth-limited reverse-import walk. full cannot list Jest\'s expanded set until tests actually run. Does not run Jest or read coverage.',
+      description: 'Map changed source files to the test files fast, smart, or full mode would run. smart (default) uses filenames plus a depth-limited reverse-import walk. full cannot list Jest\'s expanded set until tests actually run. Pass filter (a regex) to narrow the selected spec files to matching paths. Does not run Jest or read coverage.',
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -120,6 +124,7 @@ export function createServer({ version = '0.0.0' } = {}) {
         filesFrom: filesFromField,
         mode: modeField,
         depth: depthField,
+        filter: filterField,
         useConfig: useConfigField
       }
     },
@@ -163,6 +168,7 @@ export function createServer({ version = '0.0.0' } = {}) {
           'Also write the CLI markdown table to this path (relative to root). Omitted by default so the tool does not create a report file.'
         ),
         jest: jestArgsField,
+        filter: filterField,
         useConfig: useConfigField
       }
     },

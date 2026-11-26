@@ -11,6 +11,7 @@ import {
   listChangedSourceFiles,
   loadCoverageIndex,
   parseJestArgs,
+  parseFilter,
   resolveJestBin,
   resolveTestPlan,
   summarizeChangedLineResults,
@@ -100,7 +101,7 @@ function readProjectConfig(root, useConfig) {
     throw new Mo3taError(
       `Could not parse ${configPath}: ${error.message}`,
       'INVALID_CONFIG',
-      'Fix .mo3ta-coverage.json or call the tool with useConfig: false. The file only supplies base, mode, and depth.'
+      'Fix .mo3ta-coverage.json or call the tool with useConfig: false. The file only supplies base, mode, depth, jest, and filter.'
     );
   }
 
@@ -117,7 +118,8 @@ function readProjectConfig(root, useConfig) {
       base: parsed.base,
       mode: parsed.mode,
       depth: parsed.depth,
-      jest: parsed.jest
+      jest: parsed.jest,
+      filter: parsed.filter
     },
     configPath,
     found: true,
@@ -232,6 +234,24 @@ function openRepo(options = {}) {
     ? String(options.base)
     : config.base || DEFAULT_BASE;
 
+  const rawFilter = options.filter !== undefined && options.filter !== null && options.filter !== ''
+    ? options.filter
+    : (config.filter || null);
+  // Validate up front so a bad regex never reaches resolveTestPlan.
+  let filter = null;
+  try {
+    filter = parseFilter(rawFilter);
+  } catch (error) {
+    if (error.code === 'INVALID_FILTER') {
+      throw new Mo3taError(
+        error.message,
+        'INVALID_FILTER',
+        'filter is a JavaScript regular expression matched against the repo-relative spec file paths, e.g. "src/__tests__/login".'
+      );
+    }
+    throw error;
+  }
+
   assertGitRepo(root);
   assertBase(base, root);
 
@@ -247,6 +267,7 @@ function openRepo(options = {}) {
     jestArgs: parseJestArgs(
       options.jest !== undefined && options.jest !== null ? options.jest : config.jest
     ),
+    filter,
     timeoutMs,
     ciReport: options.ciReport ? String(options.ciReport) : null,
     configFound: found,
@@ -329,6 +350,7 @@ function settingsView(ctx) {
     limit: ctx.limit,
     lcov: ctx.lcov,
     jestArgs: ctx.jestArgs,
+    filter: ctx.filter ? String(ctx.filter) : null,
     configFound: ctx.configFound,
     configUsed: ctx.configUsed
   };
@@ -423,11 +445,14 @@ function summarizePlan(result) {
   const header = result.delegatedToJest
     ? `full mode passes ${result.jestTargets.length} changed file(s) to jest --findRelatedTests. Without running Jest, only ${result.testsToRun.length} changed test file(s) are known.`
     : `${result.testsToRun.length} test file(s) selected in ${result.mode} mode${result.mode === 'smart' ? ` (depth ${result.depth})` : ''}.`;
+  const filterLine = result.filter
+    ? `Filter /${result.filter}/ kept ${result.testsToRun.length} of ${result.allTestsToRun.length} candidate test file(s).`
+    : null;
   const mappingLines = result.mappings.slice(0, 30).map(mapping => {
     if (mapping.tests.length === 0) return `- ${mapping.source} → no test file (${mapping.matchType})`;
     return `- ${mapping.source} → ${mapping.tests.join(', ')} (${mapping.matchType})`;
   });
-  return [header, result.warning, ...mappingLines].filter(Boolean).join('\n');
+  return [header, filterLine, result.warning, ...mappingLines].filter(Boolean).join('\n');
 }
 
 function summarizeCheck(result) {
@@ -495,6 +520,8 @@ function presentPlan(ctx, selected, plan) {
       matchType: mapping.matchType,
       tests: mapping.tests
     })),
+    filter: plan.filter,
+    allTestsToRun: plan.allTestsToRun,
     testsToRun: plan.testsToRun,
     jestTargets: plan.jestTargets,
     warning
@@ -532,7 +559,7 @@ export function listChangedFiles(options = {}) {
 export function mapRelatedTests(options = {}) {
   const ctx = openRepo(options);
   const selected = selectInputFiles(ctx, options);
-  const plan = resolveTestPlan(selected.files, ctx.mode, ctx.depth ?? 2, ctx.root);
+  const plan = resolveTestPlan(selected.files, ctx.mode, ctx.depth ?? 2, ctx.root, ctx.jestArgs, ctx.filter);
   return presentPlan(ctx, selected, plan);
 }
 
@@ -670,7 +697,7 @@ export function checkChangedLineCoverage(options = {}) {
     return result;
   }
 
-  const plan = resolveTestPlan(selected.files, ctx.mode, ctx.depth ?? 2, ctx.root, ctx.jestArgs);
+  const plan = resolveTestPlan(selected.files, ctx.mode, ctx.depth ?? 2, ctx.root, ctx.jestArgs, ctx.filter);
   const nothingToRun = plan.delegatedToJest
     ? plan.jestTargets.length === 0
     : plan.testsToRun.length === 0;
@@ -689,10 +716,12 @@ export function checkChangedLineCoverage(options = {}) {
       cliWouldExit: 0,
       warnings: [
         ...warnings,
-        'No test files were selected, so Jest did not run. The CLI exits 0 in this case and never measures coverage. Add a test that imports the changed file.'
+        'No test files were selected, so Jest did not run. The CLI exits 0 in this case and never measures coverage. Add a test that imports the changed file.' +
+        (plan.filter ? ` All candidate test files were dropped by the filter /${plan.filter}/.` : '')
       ],
       mappings: plan.mappings,
       testsToRun: plan.testsToRun,
+      allTestsToRun: plan.allTestsToRun,
       files: filesWithoutCoverageRun(ctx, plan, budget),
       totals: { changed: 0, covered: 0, uncovered: 0, coverage: null },
       jest: { ran: false, testsFailed: false, outputTail: '', outputTruncated: false }
@@ -756,12 +785,14 @@ export function checkChangedLineCoverage(options = {}) {
     cliWouldExit,
     warnings,
     ciReport: ctx.ciReport ? path.resolve(ctx.root, ctx.ciReport) : null,
+    filter: plan.filter,
     mappings: plan.mappings.map(mapping => ({
       source: mapping.source,
       matchType: mapping.matchType,
       tests: mapping.tests
     })),
     testsToRun: plan.testsToRun,
+    allTestsToRun: plan.allTestsToRun,
     files,
     totals: {
       changed: totals.totalChanged,
