@@ -61,7 +61,7 @@ index.js
        ├─ verifyGitRepoExists()            src/gitUtils.js
        ├─ getExplicitFiles(options)        --files / --filesFrom, or
        ├─ getChangedFiles(base)            merge-base diff + working tree, all authors
-       ├─ dryRun(files, mode, depth)       --dryRun: print the would-run test list, exit 0
+       ├─ dryRun(files, mode, depth, filter)  --dryRun: print the would-run (filtered) test list, exit 0
         ├─ runRelatedTests(files, mode, depth, jestFlags)
        │    └─ npx jest ... --coverage [--jest flags]
        └─ reportUncoveredChangedLines(...)
@@ -102,6 +102,19 @@ detection is skipped. Changed lines for those files are still computed against
 Depth semantics for `smart`: one edge = an import. `--depth 1` finds test files
 that import the changed file directly. `--depth 2` also finds test files that
 import a module which imports the changed file.
+
+### Spec filter
+
+`--filter <regex>` (CLI, config `"filter"`, or the API/MCP `filter` argument)
+compiles to a regex via `parseFilter()` and is applied to the **final** list
+of selected spec paths by `filterTestFiles()` inside `resolveTestPlan()`.
+`resolveTestPlan` returns both `allTestsToRun` (before the filter) and
+`testsToRun` (after it); `logFilteredTestFiles()` prints both lists so the
+user can validate the regex. An invalid regex throws
+`INVALID_FILTER`, which `main()` turns into exit 1. In `full` mode the regex
+is also appended to Jest's args as `--testPathPatterns` (skipped when the
+caller already supplied a Jest path pattern via `--jest`). Config values are
+merged in `index.js` before `main()`.
 
 ### Coverage reporting
 
@@ -151,7 +164,9 @@ import a module which imports the changed file.
   timeout control, but drops it when the caller passes `--maxWorkers`/`-w`/`-i`
   because Jest rejects `--runInBand` together with `--maxWorkers`.
 - `--dryRun` must keep stdout a clean one-path-per-line list (other tools
-  consume it); informational messages go to stderr.
+  consume it); informational messages go to stderr, including the
+  before/after filter log (`dryRun` receives the filter and prints the log
+  via `console.error`).
 - The config subcommand writes `.mo3ta-coverage.json` in `process.cwd()`.
 - CLI options with commander defaults (`mode`, `depth`) override config unless
   you check `program.getOptionValueSource(...) === 'cli'`.
