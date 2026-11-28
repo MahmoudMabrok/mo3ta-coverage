@@ -378,8 +378,11 @@ One depth step is one import edge:
 
 - `--depth 1`: test files that import the changed file directly.
 - `--depth 2` (default): also test files that import a module which imports the changed file.
+- `--depth 3`: recommended for monorepos where cross-package imports go through a package barrel (`index.ts`) and an intermediate consumer module (`changed.ts` → `pkg/index.ts` → `app/service.ts` → `app/service.test.ts`).
 
-Depth `2` is usually the sweet spot: it catches barrel/re-export and thin wrapper
+Both `smart` and `fast` modes resolve relative imports, `tsconfig.json` / `tsconfig.base.json` / `jsconfig.json` `paths` & `baseUrl` (including per-package `extends`), and workspace `package.json` names (`exports`, `source`, `module`, `main`).
+
+Depth `2` is usually the sweet spot for single-package projects: it catches barrel/re-export and thin wrapper
 layers without pulling in the whole dependency graph.
 
 ## Recommended Mode

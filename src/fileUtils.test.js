@@ -415,4 +415,148 @@ describe('findRelatedTestFilesBySource', () => {
 
         expect(result).toEqual([]);
     });
+
+    it('resolves cross-lib relative imports and dotted filenames', () => {
+        const root = createFixture({
+            'libs/shared/src/date.utils.ts': 'export const formatDate = () => "2026";',
+            'libs/app/src/auth.service.ts': "import { formatDate } from '../../shared/src/date.utils';\nexport const login = () => formatDate();\n",
+            'libs/app/src/login.spec.ts': "import { login } from './auth.service';\n"
+        });
+
+        const result = findRelatedTestFilesBySource('libs/shared/src/date.utils.ts', { root, maxDepth: 2 });
+
+        expect(result).toEqual(['libs/app/src/login.spec.ts']);
+    });
+
+    it('resolves tsconfig.base.json paths with JSONC comments and trailing commas', () => {
+        const root = createFixture({
+            'tsconfig.base.json': `{
+              // root monorepo config
+              "compilerOptions": {
+                "baseUrl": ".",
+                /* preserve glob patterns inside strings */
+                "paths": {
+                  "@myorg/shared": ["libs/shared/src/index.ts"],
+                  "@myorg/shared/*": ["libs/shared/src/*"],
+                },
+              },
+            }`,
+            'libs/shared/src/index.ts': "export * from './math';\n",
+            'libs/shared/src/math.ts': 'export const add = (a, b) => a + b;',
+            'libs/app/src/calc.ts': "import { add } from '@myorg/shared/math';\nexport const run = () => add(1, 2);\n",
+            'libs/app/src/calc.test.ts': "import { run } from './calc';\n",
+            'libs/app/src/barrel.spec.ts': "import { add } from '@myorg/shared';\n"
+        });
+
+        const directSubpath = findRelatedTestFilesBySource('libs/shared/src/math.ts', { root, maxDepth: 2 });
+        const viaBarrelDepth3 = findRelatedTestFilesBySource('libs/shared/src/math.ts', { root, maxDepth: 3 });
+
+        expect(directSubpath).toEqual(['libs/app/src/barrel.spec.ts', 'libs/app/src/calc.test.ts']);
+        expect(viaBarrelDepth3).toEqual(['libs/app/src/barrel.spec.ts', 'libs/app/src/calc.test.ts']);
+    });
+
+    it('scopes per-package @/* tsconfig paths while inheriting monorepo paths', () => {
+        const root = createFixture({
+            'tsconfig.base.json': JSON.stringify({
+                compilerOptions: {
+                    baseUrl: '.',
+                    paths: {
+                        '@myorg/shared': ['libs/shared/src/index.ts']
+                    }
+                }
+            }),
+            'libs/shared/tsconfig.json': JSON.stringify({
+                extends: '../../tsconfig.base.json',
+                compilerOptions: {
+                    baseUrl: '.',
+                    paths: {
+                        '@/*': ['src/*']
+                    }
+                }
+            }),
+            'libs/app/tsconfig.json': JSON.stringify({
+                extends: '../../tsconfig.base.json',
+                compilerOptions: {
+                    baseUrl: '.',
+                    paths: {
+                        '@/*': ['src/*']
+                    }
+                }
+            }),
+            'libs/shared/src/helper.ts': 'export const helper = () => 1;',
+            'libs/shared/src/index.ts': "export { helper } from '@/helper';\n",
+            'libs/app/src/helper.ts': 'export const appHelper = () => 2;',
+            'libs/app/src/app.service.ts': "import { helper } from '@myorg/shared';\nimport { appHelper } from '@/helper';\nexport const run = () => helper() + appHelper();\n",
+            'libs/app/src/app.spec.ts': "import { run } from './app.service';\n"
+        });
+
+        // Changing libs/app/src/helper.ts should only hit app.spec.ts, not shared's index.
+        expect(findRelatedTestFilesBySource('libs/app/src/helper.ts', { root, maxDepth: 2 })).toEqual([
+            'libs/app/src/app.spec.ts'
+        ]);
+
+        // Changing libs/shared/src/helper.ts walks:
+        //   libs/shared/src/helper.ts -> libs/shared/src/index.ts (depth 1)
+        //   -> libs/app/src/app.service.ts (depth 2) -> libs/app/src/app.spec.ts (depth 3).
+        expect(findRelatedTestFilesBySource('libs/shared/src/helper.ts', { root, maxDepth: 2 })).toEqual([]);
+        expect(findRelatedTestFilesBySource('libs/shared/src/helper.ts', { root, maxDepth: 3 })).toEqual([
+            'libs/app/src/app.spec.ts'
+        ]);
+    });
+
+    it('resolves workspace package.json names via main (dist->src) and exports wildcards', () => {
+        const root = createFixture({
+            'packages/utils/package.json': JSON.stringify({
+                name: '@myorg/utils',
+                main: './dist/index.js',
+                exports: {
+                    '.': {
+                        import: './dist/index.js'
+                    },
+                    './*': './src/*.ts'
+                }
+            }),
+            'packages/utils/src/index.ts': "export * from './format';\n",
+            'packages/utils/src/format.ts': 'export const fmt = s => s.trim();',
+            'packages/web/src/view.ts': "import { fmt } from '@myorg/utils';\nexport const render = () => fmt(' hi ');\n",
+            'packages/web/src/view.test.ts': "import { render } from './view';\n",
+            'packages/web/src/subpath.test.ts': "import { fmt } from '@myorg/utils/format';\n"
+        });
+
+        expect(findRelatedTestFilesBySource('packages/utils/src/format.ts', { root, maxDepth: 3 })).toEqual([
+            'packages/web/src/subpath.test.ts',
+            'packages/web/src/view.test.ts'
+        ]);
+        expect(findTestFilesByImport('packages/utils/src/format.ts', root)).toEqual([
+            'packages/web/src/subpath.test.ts'
+        ]);
+    });
+
+    it('resolves non-relative barrel directory imports and jest helper imports', () => {
+        const root = createFixture({
+            'src/utils/index.ts': 'export const ok = true;',
+            'src/a.test.ts': "import { ok } from '@/utils';\n",
+            'src/b.test.ts': "jest.doMock('@/utils');\nconst mod = jest.requireActual('@/utils');\n"
+        });
+
+        expect(findRelatedTestFilesBySource('src/utils/index.ts', { root, maxDepth: 1 })).toEqual([
+            'src/a.test.ts',
+            'src/b.test.ts'
+        ]);
+        expect(findTestFilesByImport('src/utils/index.ts', root)).toEqual([
+            'src/a.test.ts',
+            'src/b.test.ts'
+        ]);
+    });
+
+    it('does not falsely match third-party scoped packages against local files', () => {
+        const root = createFixture({
+            'src/react.ts': 'export const localReact = 1;',
+            'src/core.ts': 'export const localCore = 1;',
+            'src/app.test.ts': "import { render } from '@testing-library/react';\nimport babel from '@babel/core';\n"
+        });
+
+        expect(findRelatedTestFilesBySource('src/react.ts', { root, maxDepth: 2 })).toEqual([]);
+        expect(findRelatedTestFilesBySource('src/core.ts', { root, maxDepth: 2 })).toEqual([]);
+    });
 });

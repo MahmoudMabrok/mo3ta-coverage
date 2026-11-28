@@ -150,11 +150,8 @@ merged in `index.js` before `main()`.
 - `findTestFilesForSource` and `findRelatedTestFilesBySource` return paths
   relative to the scan root; `findTestFilesByImport` also accepts a `root` for
   tests using temp fixtures.
-- Import-graph and test-file scans are cached per root for the lifetime of the
-  process. Tests must use a fresh temp directory per fixture (they do).
-- Alias resolution is heuristic: `@/` and `~/` are stripped, then the specifier
-  is matched against repo-relative paths by exact match or path suffix.
-  Over-matching is acceptable (it may run extra tests) but under-matching is not.
+- Import-graph and test-file scans (along with the resolver context: `tsconfig`/`jsconfig` `paths` and workspace `package.json` map) are cached per root for the lifetime of the process; `clearScanCaches()` resets all of them. Tests must use a fresh temp directory per fixture (they do).
+- Non-relative specifier resolution resolves `tsconfig.json`/`tsconfig.base.json`/`jsconfig.json` `paths` & `baseUrl` (with `extends`) first, then workspace `package.json` names (`exports`/`source`/`module`/`main`, mapping `dist/`/`build/` to `src/`), and finally falls back to heuristic `@/` / `~/` / `@scope/path` suffix matching. Over-matching is acceptable (it may run extra tests) but under-matching is not.
 - `runRelatedTests` exits the process (`exit(0)`/`exit(1)`) rather than throwing.
 - Extra Jest flags come from `--jest` (repeatable or comma-separated, parsed by
   `parseJestArgs`) and are appended after the selected test files in
