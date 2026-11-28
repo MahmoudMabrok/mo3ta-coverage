@@ -261,6 +261,7 @@ section h2 { font-size: clamp(1.8rem, 3vw, 2.4rem); margin: 0 0 8px; }
 
 .steps { grid-template-columns: repeat(4, 1fr); }
 .cards { grid-template-columns: repeat(3, 1fr); }
+.cards.two { grid-template-columns: repeat(2, 1fr); }
 .feature-grid { grid-template-columns: 1fr 1fr; }
 
 .card, .step, .feature-grid li, .note, .table-wrap {
@@ -382,7 +383,7 @@ tr:last-child td { border-bottom: 0; }
 
 @media (max-width: 900px) {
   :root { --header-offset: 128px; }
-  .steps, .cards { grid-template-columns: 1fr; }
+  .steps, .cards, .cards.two { grid-template-columns: 1fr; }
   .feature-grid { grid-template-columns: 1fr; }
   .tool-list li { grid-template-columns: 1fr; gap: 4px; }
   .site-header .wrap {

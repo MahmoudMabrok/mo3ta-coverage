@@ -85,27 +85,32 @@ repository.
 
 ## Installation
 
+Install locally as a dev dependency (recommended for CI and team consistency) or globally:
+
 ```sh
+# Local dev dependency
+npm install --save-dev mo3ta-coverage
+
+# Global install
 npm install -g mo3ta-coverage
+```
+
+Or run directly with `npx` without installing globally:
+
+```sh
+npx mo3ta-coverage --mode smart --base origin/main --limit 80
 ```
 
 ### Install from GitHub
 
-Prefer the latest commit over the published npm release? Install directly from
-this repository — no publish step, no clone needed:
+Prefer an unreleased commit directly from GitHub?
 
 ```sh
 # Global install from the default branch
 npm install -g github:MahmoudMabrok/mo3ta-coverage
 
-# One-off, without installing at all
-npx github:MahmoudMabrok/mo3ta-coverage --mode smart --base origin/main --limit 80
-```
-
-Pin a release tag or a specific commit for reproducible installs:
-
-```sh
-npm install -g github:MahmoudMabrok/mo3ta-coverage#v1.1.0
+# Pin a release tag or commit SHA for reproducible installs
+npm install -g github:MahmoudMabrok/mo3ta-coverage#v1.3.6
 npm install -g github:MahmoudMabrok/mo3ta-coverage#<commit-sha>
 ```
 
@@ -121,12 +126,18 @@ npm link            # exposes the mo3ta-coverage binary globally
 ## Usage
 
 ```sh
-mo3ta-coverage --mode smart --base origin/main --limit 80
+npx mo3ta-coverage --mode smart --base origin/main --limit 80
+```
+
+Or opt into the Jest discovery engine (`--engine jest`):
+
+```sh
+npx mo3ta-coverage --mode smart --engine jest --depth 2 --base origin/main --limit 80
 ```
 
 ## Recipes
 
-Two common ways to use the CLI straight from GitHub — no global install.
+Common ways to run `mo3ta-coverage` after installing from npm (`npm install --save-dev mo3ta-coverage`) or on demand via `npx`.
 
 ### 1. Get the selected test files, then run Jest yourself
 
@@ -136,7 +147,7 @@ Jest directly — no coverage check, no extra runner:
 
 ```sh
 # 1. Discover the tests that cover the changed files
-npx github:MahmoudMabrok/mo3ta-coverage \
+npx mo3ta-coverage \
   --dryRun true \
   --mode smart \
   --base origin/main > selected-tests.txt
@@ -148,7 +159,7 @@ npx jest $(cat selected-tests.txt)
 Or pipe the list straight into Jest:
 
 ```sh
-npx github:MahmoudMabrok/mo3ta-coverage --dryRun true --base origin/main \
+npx mo3ta-coverage --dryRun true --base origin/main \
   | xargs npx jest
 ```
 
@@ -162,7 +173,7 @@ Jest, parse `coverage/lcov.info`, and fail when changed-line coverage is below
 `--limit`:
 
 ```sh
-npx github:MahmoudMabrok/mo3ta-coverage \
+npx mo3ta-coverage \
   --mode smart \
   --base origin/main \
   --limit 80
@@ -170,7 +181,9 @@ npx github:MahmoudMabrok/mo3ta-coverage \
 
 `smart` follows reverse imports up to `--depth` (default `2`), which catches
 specs that reach the changed file through barrel files. See
-[Modes](#modes) for `fast`, `smart`, and `full`, and `--engine` for `native` vs `jest`.
+[Modes & Engines](#modes--engines) for `fast`, `smart`, and `full`, and
+[Jest Engine — Samples & Use Cases](#jest-engine---engine-jest--samples--use-cases)
+for `--engine jest`.
 
 ### 3. Opt into the Jest discovery engine with `--explain` and `--fallback`
 
@@ -179,11 +192,12 @@ React Native platform extensions, multi-project configs, or `.snap` snapshot
 mapping, opt into `--engine jest` in `smart` mode:
 
 ```sh
-mo3ta-coverage \
+npx mo3ta-coverage \
   --mode smart \
   --engine jest \
+  --depth 2 \
   --discoveryWorkers 4 \
-  --explain \
+  --explain true \
   --fallback native \
   --base origin/main \
   --limit 80
@@ -419,15 +433,166 @@ The `native` engine resolves relative imports, `tsconfig.json` / `tsconfig.base.
 
 Depth `2` is usually the sweet spot for single-package projects: it catches barrel/re-export and thin wrapper layers without pulling in the whole dependency graph.
 
-### Opt-in Jest engine (`--engine jest`)
+## Jest Engine (`--engine jest`) — Samples & Use Cases
 
-When `--mode smart --engine jest` is enabled:
+By default, `smart` mode uses the zero-dependency `native` engine. When your repository relies on Jest-specific resolution or multi-project setups, opt into `--engine jest` so `mo3ta-coverage` reuses your project's own Jest 29/30 configuration, HasteFS, `DependencyResolver`, `SearchSource`, and `SnapshotResolver`, then runs a bounded reverse-BFS up to `--depth` and executes exact test paths via `--runTestsByPath`.
+
+### Quick start (npm)
+
+```sh
+npm install --save-dev mo3ta-coverage
+npx mo3ta-coverage --mode smart --engine jest --depth 2 --base origin/main --limit 80
+```
+
+### Use Case 1 — Custom aliases (`moduleNameMapper`), custom `resolver`, and manual `__mocks__`
+
+Projects with Jest `moduleNameMapper` rules, custom `resolver` hooks, or manual `__mocks__` directories often have import edges that static `tsconfig`/regex scanning cannot predict:
+
+```sh
+npx mo3ta-coverage \
+  --mode smart \
+  --engine jest \
+  --depth 2 \
+  --base origin/main
+```
+
+Because Jest's own `DependencyResolver` resolves every file in HasteFS using your `jest.config.*`, changes to aliased modules or manual mocks select the exact specs that depend on them.
+
+### Use Case 2 — React Native & platform extensions
+
+React Native projects use platform-specific file extensions (`.ios.ts`, `.android.ts`, `.native.js`) configured via Jest's `moduleFileExtensions` and Haste settings:
+
+```sh
+npx mo3ta-coverage \
+  --mode smart \
+  --engine jest \
+  --depth 2 \
+  --discoveryWorkers 4 \
+  --base origin/main
+```
+
+`--engine jest` respects your configured `moduleFileExtensions` and Haste platform resolution without custom mo3ta configuration.
+
+### Use Case 3 — Multi-project monorepos (`projects`, `--selectProjects`, `--ignoreProjects`)
+
+Each Jest project in `projects` is resolved with its own independent graph so identical relative spec paths or different `moduleNameMapper` rules never collide:
+
+```sh
+npx mo3ta-coverage \
+  --mode smart \
+  --engine jest \
+  --depth 2 \
+  --base origin/main \
+  --jest --config=jest.config.js \
+  --jest --selectProjects=web
+```
+
+When multiple named projects are configured and only a subset contains matched tests, `mo3ta-coverage` automatically narrows Jest execution with `--selectProjects` alongside `--runTestsByPath`.
+
+### Use Case 4 — Snapshot (`.snap`) changes and custom `testMatch` / `testRegex`
+
+When `--engine jest` is active, changed `.snap` files are included in discovery and mapped back to their owning test files via Jest's `SnapshotResolver`, and test files are classified using Jest's own `testMatch` / `testRegex` / `testPathIgnorePatterns`:
+
+```sh
+npx mo3ta-coverage \
+  --mode smart \
+  --engine jest \
+  --files src/__snapshots__/card.test.js.snap \
+  --base origin/main
+```
+
+### Use Case 5 — Previewing & explaining selections (`--dryRun true --explain true`)
+
+Inspect why each test was selected before running Jest:
+
+```sh
+npx mo3ta-coverage \
+  --mode smart \
+  --engine jest \
+  --depth 2 \
+  --dryRun true \
+  --explain true \
+  --files src/fileUtils.js \
+  --base origin/main
+```
+
+Sample output (`stderr` holds explanations and diagnostics; `stdout` stays clean test paths only):
+
+```text
+🧭 Dependency explanations:
+   src/fileUtils.js -> src/fileUtils.test.js (depth 1, path: src/fileUtils.js -> src/fileUtils.test.js)
+   src/fileUtils.js -> src/cli.test.js (depth 2, path: src/fileUtils.js -> src/cli.js -> src/cli.test.js)
+   src/fileUtils.js -> src/api.test.js (depth 2, path: src/fileUtils.js -> src/api.js -> src/api.test.js)
+src/api.test.js
+src/cli.test.js
+src/fileUtils.test.js
+```
+
+### Use Case 6 — Resilient CI setup (`--discoveryWorkers`, `--fallback native`, `package.json`, `.mo3ta-coverage.json`)
+
+Persist repo defaults in `.mo3ta-coverage.json` and wire an npm script:
+
+```sh
+npx mo3ta-coverage config \
+  --mode smart \
+  --engine jest \
+  --depth 2 \
+  --discoveryWorkers 4 \
+  --fallback native
+```
+
+This writes `.mo3ta-coverage.json`:
+
+```json
+{
+  "mode": "smart",
+  "engine": "jest",
+  "depth": 2,
+  "discoveryWorkers": 4,
+  "fallback": "native"
+}
+```
+
+Add a script to `package.json`:
+
+```json
+{
+  "scripts": {
+    "test:pr-coverage": "mo3ta-coverage --base origin/main --limit 80 --ci true"
+  }
+}
+```
+
+```sh
+npm run test:pr-coverage
+```
+
+### Use Case 7 — Programmatic API & MCP
+
+Call `mapRelatedTests` or `checkChangedLineCoverage` from Node.js or through the MCP server with the same options:
+
+```js
+import { mapRelatedTests } from 'mo3ta-coverage/src/api.js';
+
+const plan = mapRelatedTests({
+  root: process.cwd(),
+  base: 'origin/main',
+  mode: 'smart',
+  engine: 'jest',
+  depth: 2,
+  discoveryWorkers: 2,
+  explain: true,
+  fallback: 'error'
+});
+
+console.log(plan.testsToRun);
+console.log(plan.explanation);
+```
+
+### Compatibility, Performance & Limitations
 
 - **Jest compatibility (29 and 30)**: `mo3ta-coverage` resolves Jest directly from the target repository's `node_modules` (supporting npm, yarn, and pnpm layouts) and refuses to fall back to `mo3ta-coverage`'s own Jest installation.
-- **Multi-project support**: Discovers across Jest `projects`, honors `--selectProjects` and `--ignoreProjects` passed via `--jest`, and automatically passes `--selectProjects` for `--runTestsByPath` execution when multiple named projects exist and only a subset matched.
-- **Snapshot mapping**: Changed `.snap` files are mapped back to their owning test files through Jest's `SnapshotResolver`.
-- **Dependency explanations (`--explain`)**: Prints the shortest dependency chain from each changed source file to each selected test file (and project name when multi-project).
-- **Graceful fallback (`--fallback`)**: Defaults to `error` so configuration or Jest errors fail fast; pass `--fallback native` to fall back to the `native` engine when `--engine jest` cannot initialize.
+- **Incompatible `--jest` flags**: Flags that conflict with bounded `--runTestsByPath` discovery/execution (`--findRelatedTests`, `--watch`, `--watchAll` other than `--watchAll=false`, `--listTests`, `--showConfig`, `--clearCache`, `--init`, `--help`/`-h`, `--version`/`-v`, `--runTestsByPath`, `--onlyChanged`/`-o`, `--lastCommit`, `--changedSince`, `--changedFilesWithAncestor`) are rejected with `INVALID_JEST_FLAG_FOR_ENGINE`.
 - **Performance characteristics**: Unlike `native`, a cold `--engine jest` run builds Jest's HasteMap and resolves dependencies across all project files (`configMs`, `hasteMapMs`, `resolveMs`, `graphMs`, `bfsMs`). Subsequent runs with a warm Jest cache are substantially faster while still avoiding the unbounded expansion of `--mode full`.
 - **Known limitations**: Static dependency graphs in both engines cannot detect purely dynamic/computed runtime imports (`require(variable)`), and deleted or renamed files that no longer exist on disk/HasteFS are skipped with a warning. Always keep a full-suite CI run (e.g. on `main`) as a safety net.
 
@@ -436,7 +601,7 @@ When `--mode smart --engine jest` is enabled:
 For most projects, especially large ones with shared helpers or deep import graphs, use:
 
 ```sh
-mo3ta-coverage --mode smart --base origin/main --limit 80
+npx mo3ta-coverage --mode smart --base origin/main --limit 80
 ```
 
 Opt into `--engine jest` if your suite relies on Jest custom resolvers, `moduleNameMapper`, manual `__mocks__`, React Native platform extensions, multi-project configs, or snapshot mapping. Use `full` only when you intentionally want Jest to expand to related tests without a depth bound.
