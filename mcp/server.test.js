@@ -15,6 +15,21 @@ function git(repo, command) {
   execSync(command, { cwd: repo, stdio: 'pipe' });
 }
 
+function linkFixtureNodeModules(root) {
+  const targetModules = path.join(REPO_ROOT, 'node_modules');
+  const fixtureModules = path.join(root, 'node_modules');
+  fs.mkdirSync(fixtureModules, { recursive: true });
+  for (const entry of fs.readdirSync(targetModules)) {
+    const src = path.join(targetModules, entry);
+    const dest = path.join(fixtureModules, entry);
+    if (entry === 'jest') {
+      fs.cpSync(src, dest, { recursive: true });
+    } else {
+      fs.symlinkSync(src, dest, 'dir');
+    }
+  }
+}
+
 function initFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mo3ta-mcp-'));
   git(root, 'git init -b main -q');
@@ -85,6 +100,11 @@ test('registers the coverage tools', async () => {
     ]);
     const check = listed.tools.find(tool => tool.name === 'check_changed_line_coverage');
     assert.match(check.description, /uncovered/);
+    const mapTool = listed.tools.find(tool => tool.name === 'map_related_tests');
+    for (const field of ['engine', 'discoveryWorkers', 'explain', 'fallback']) {
+      assert.ok(field in mapTool.inputSchema.properties, `map_related_tests should expose ${field}`);
+      assert.ok(field in check.inputSchema.properties, `check_changed_line_coverage should expose ${field}`);
+    }
   } finally {
     await session.close();
   }
@@ -287,4 +307,86 @@ test('the stdio entry does not write protocol output before a client connects', 
   child.kill('SIGTERM');
   await new Promise(resolve => child.once('exit', resolve));
   assert.equal(stdout, '');
+});
+
+test('map_related_tests and check_changed_line_coverage support engine: jest and explain: true', async () => {
+  const root = initFixture();
+  linkFixtureNodeModules(root);
+  const session = await connect();
+  try {
+    const mapped = await session.client.callTool({
+      name: 'map_related_tests',
+      arguments: {
+        root,
+        base: 'main',
+        mode: 'smart',
+        engine: 'jest',
+        explain: true,
+        useConfig: false
+      }
+    });
+    assert.equal(mapped.isError, false);
+    const mappedData = dataOf(mapped);
+    assert.equal(mappedData.engine, 'jest');
+    assert.equal(mappedData.requestedEngine, 'jest');
+    assert.equal(mappedData.fallbackUsed, false);
+    assert.match(mappedData.jestVersion, /^30\./);
+    assert.ok(mappedData.metrics);
+    assert.ok(Array.isArray(mappedData.explanation));
+    assert.ok(mappedData.explanation.length > 0);
+    assert.deepEqual(mappedData.testsToRun, ['src/math.test.js']);
+    assert.match(mappedData.summary, /engine: jest/);
+
+    const checked = await session.client.callTool({
+      name: 'check_changed_line_coverage',
+      arguments: {
+        root,
+        base: 'main',
+        mode: 'smart',
+        engine: 'jest',
+        explain: true,
+        limit: 100,
+        useConfig: false,
+        timeoutMs: 120000
+      }
+    });
+    assert.equal(checked.isError, false);
+    const checkedData = dataOf(checked);
+    assert.equal(checkedData.engine, 'jest');
+    assert.equal(checkedData.requestedEngine, 'jest');
+    assert.equal(checkedData.fallbackUsed, false);
+    assert.match(checkedData.jestVersion, /^30\./);
+    assert.ok(checkedData.metrics);
+    assert.ok(Array.isArray(checkedData.explanation));
+    assert.equal(checkedData.coveragePassed, false);
+    assert.match(checkedData.summary, /Discovery engine: jest/);
+    assert.match(checkedData.summary, /return a - b/);
+  } finally {
+    await session.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('map_related_tests reports JEST_NOT_FOUND when engine is jest and Jest is absent', async () => {
+  const root = initFixture();
+  const session = await connect();
+  try {
+    const mapped = await session.client.callTool({
+      name: 'map_related_tests',
+      arguments: {
+        root,
+        base: 'main',
+        mode: 'smart',
+        engine: 'jest',
+        useConfig: false
+      }
+    });
+    assert.equal(mapped.isError, true);
+    const data = dataOf(mapped);
+    assert.equal(data.code, 'JEST_NOT_FOUND');
+    assert.ok(data.hint);
+  } finally {
+    await session.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

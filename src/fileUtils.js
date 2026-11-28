@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { traverseReverseGraph } from './engines/reverseGraph.js';
 
 const TEST_FILE_RE = /(\.test|\.spec)\.(js|ts|jsx|tsx)$/;
 const JS_EXTENSIONS = ['.js', '.ts', '.jsx', '.tsx'];
@@ -909,39 +910,26 @@ export function findRelatedTestFilesBySource(sourceFile, {
   maxDepth = 2
 } = {}) {
   const related = new Set(findTestFilesForSourceInRoot(sourceFile, root));
-  const depthLimit = Math.max(0, Number.parseInt(maxDepth, 10) || 0);
+  const depthLimit = maxDepth === Infinity
+    ? Infinity
+    : Math.max(0, Number.parseInt(maxDepth, 10) || 0);
   if (depthLimit === 0) {
     return Array.from(related).sort();
   }
 
   const reverseIndex = buildReverseImportIndex(root);
   const start = path.resolve(root, sourceFile);
-  const visited = new Set([start]);
-  let frontier = new Set([start]);
+  const distances = traverseReverseGraph(reverseIndex, [start], depthLimit, {
+    shouldExpand: importer => !isTestFile(path.relative(root, importer))
+  });
 
-  for (let depth = 1; depth <= depthLimit && frontier.size > 0; depth++) {
-    const next = new Set();
-
-    frontier.forEach(node => {
-      const importers = reverseIndex.get(node);
-      if (!importers) return;
-
-      importers.forEach(importer => {
-        if (visited.has(importer)) return;
-        visited.add(importer);
-
-        const relImporter = path.relative(root, importer);
-        if (isTestFile(relImporter)) {
-          related.add(relImporter);
-        } else {
-          // Non-test importers are only useful as traversal hops.
-          next.add(importer);
-        }
-      });
-    });
-
-    frontier = next;
-  }
+  distances.forEach((distance, node) => {
+    if (distance === 0) return;
+    const relImporter = path.relative(root, node);
+    if (isTestFile(relImporter)) {
+      related.add(relImporter);
+    }
+  });
 
   return Array.from(related).sort();
 }

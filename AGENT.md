@@ -44,10 +44,19 @@ There is no lint/typecheck/format script. `npm run build` currently outputs
 | --- | --- |
 | `index.js` | CLI entry point: option parsing, config file read/write, calls `main()`. |
 | `src/cli.js` | Orchestration: changed files, test selection, Jest invocation, lcov reporting. |
+| `src/api.js` | Programmatic/MCP API (`listChangedFiles`, `mapRelatedTests`, `checkChangedLineCoverage`). |
 | `src/fileUtils.js` | File classification and changed-file → test-file mapping. |
 | `src/gitUtils.js` | Git repo/base-branch validation. |
+| `src/engines/reverseGraph.js` | Reverse dependency graph builder and bounded BFS traversal with path reconstruction. |
+| `src/engines/nativeEngine.js` | Default `fast` / `smart` test-plan resolver backed by `src/fileUtils.js`. |
+| `src/engines/jestEngine.js` | Opt-in `smart` mode engine: flag validation, worker orchestration, project narrowing, `--explain` shaping. |
+| `src/engines/jestLoader.cjs` | Project-local Jest 29/30 package resolver (npm/yarn/pnpm) with leak guard and realpath normalization. |
+| `src/engines/jestWorker.cjs` | Isolated CommonJS subprocess running Jest `readConfigs`, `Runtime.createContext`, `DependencyResolver`, `SearchSource`, and `SnapshotResolver`. |
 | `src/cli.test.js` | Tests for lcov parsing, changed-line classification, summaries. |
 | `src/fileUtils.test.js` | Tests for file filtering, naming conventions, import scanning. |
+| `src/engines/reverseGraph.test.js` | Unit tests for `reverseGraph.js`. |
+| `src/engines/jestEngine.test.js` | Unit and integration tests for `jestLoader.cjs`, `jestWorker.cjs`, and `jestEngine.js`. |
+| `scripts/benchmark-engines.mjs` | Standalone benchmark comparing `nativeEngine`, `jestEngine`, and `jest --findRelatedTests --listTests --json`. |
 | `jest.config.json` | Jest config: `**/src/**/*.test.js`, node env, babel-jest transform. |
 | `.github/workflows/dependency-audit.yml` | Daily dependency security audit; opens/updates a tracked issue on findings. |
 | `.github/scripts/audit-open-issue.mjs` | Issue manager for the audit workflow (`gh` CLI). |
@@ -92,16 +101,56 @@ detection is skipped. Changed lines for those files are still computed against
 - `fast`: naming-convention matches only (plus changed test files), with the
   existing direct import-scan fallback. No dependency traversal.
 - `smart` (default): naming-convention matches **plus** a reverse-dependency
-  search over the import graph, limited by `--depth` (default `2`). This finds
-  spec files whose names do not match the source file and tests that reach the
-  changed file through one intermediate module (for example a barrel
-  `index.js`).
+  search over the import graph, limited by `--depth` (default `2`). Supports
+  two discovery engines via `--engine`:
+  - `native` (default): uses `src/engines/nativeEngine.js` + `src/fileUtils.js`
+    (regex import scanner + `tsconfig`/`jsconfig` + workspace `package.json`
+    resolution).
+  - `jest` (opt-in): uses `src/engines/jestEngine.js` + `jestLoader.cjs` +
+    `jestWorker.cjs` to run Jest 29/30's own `HasteFS`, `DependencyResolver`,
+    `SearchSource`, and `SnapshotResolver` in an isolated subprocess, then
+    runs bounded BFS via `src/engines/reverseGraph.js`.
 - `full`: passes the changed source and test files to
   `jest --findRelatedTests`, letting Jest do unbounded traversal.
 
 Depth semantics for `smart`: one edge = an import. `--depth 1` finds test files
 that import the changed file directly. `--depth 2` also finds test files that
 import a module which imports the changed file.
+
+### Smart-mode Jest engine architecture (`src/engines/`)
+
+- **CommonJS worker subprocess (`jestLoader.cjs` + `jestWorker.cjs`)**:
+  `jestEngine.js` writes a JSON request to a temp directory (`0o700`) and spawns
+  `jestWorker.cjs` via `execFileSync(process.execPath, [WORKER_PATH, reqPath, resPath])`.
+  Using `.cjs` files avoids `babel-jest` + `import.meta.url` transformation
+  issues in this repo's test suite and lets `createRequire` resolve Jest 29/30
+  packages (`jest`, `jest-cli`, `@jest/core`, `jest-config`, `jest-runtime`,
+  `jest-resolve-dependencies`, `jest-snapshot`) directly from the target repo's
+  `package.json` across npm, yarn, and pnpm symlinked layouts—while refusing to
+  leak `mo3ta-coverage`'s own `node_modules` (`isLeakingPackageRootModules`).
+- **macOS realpath normalization**: `jestLoader.cjs` (`realpathOrClosest`) and
+  `jestWorker.cjs` normalize `root` and file paths with `fs.realpathSync` so
+  macOS `/var` -> `/private/var` symlinks match Jest's internal HasteFS keys.
+- **Multi-project (`selectProjects` / `ignoreProjects`) handling**:
+  `jestWorker.cjs` honors `--projects`, `--selectProjects`, and `--ignoreProjects`
+  passed through `--jest` (`extractDiscoveryJestArgs`) via `selectProjectConfigs()`.
+  When multiple Jest projects are configured and no explicit `--selectProjects`
+  or `--ignoreProjects` was passed, `resolveJestPlan()` narrows execution with
+  `--selectProjects <names...>` to only projects with matched tests (or emits a
+  warning if any active project lacks `displayName`).
+- **`--runTestsByPath` execution & incompatible flags**:
+  `resolveJestPlan()` builds `executionJestArgs` with
+  `--passWithNoTests --coverage --runTestsByPath ...testsToRun`, and
+  `validateJestEngineFlags()` rejects `INCOMPATIBLE_JEST_FLAGS` (such as
+  `--findRelatedTests`, `--watch`, `--watchAll`, `--listTests`, `--showConfig`,
+  `--clearCache`, `--runTestsByPath`, `--onlyChanged`, `-o`, etc.).
+- **Error codes**:
+  - `JEST_NOT_FOUND`: Jest is missing in the target repo (or would leak from `PACKAGE_ROOT`).
+  - `JEST_UNSUPPORTED_VERSION`: Jest major is not 29 or 30, or required internal APIs are missing.
+  - `JEST_CONFIG_ERROR`: `buildArgv` / `readConfigs` failed or project selection left zero projects.
+  - `INVALID_JEST_FLAG_FOR_ENGINE`: Caller passed a flag in `INCOMPATIBLE_JEST_FLAGS`.
+  - `JEST_DISCOVERY_TIMEOUT`: `jestWorker.cjs` exceeded `discoveryTimeoutMs`.
+  - `JEST_DISCOVERY_FAILED`: Worker crashed, timed out without output, or returned malformed JSON.
 
 ### Spec filter
 

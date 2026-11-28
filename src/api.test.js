@@ -14,6 +14,21 @@ function git(repo, command) {
   execSync(command, { cwd: repo, stdio: 'pipe' });
 }
 
+function linkFixtureNodeModules(root, repoRoot = process.cwd()) {
+  const targetModules = path.join(repoRoot, 'node_modules');
+  const fixtureModules = path.join(root, 'node_modules');
+  fs.mkdirSync(fixtureModules, { recursive: true });
+  for (const entry of fs.readdirSync(targetModules)) {
+    const src = path.join(targetModules, entry);
+    const dest = path.join(fixtureModules, entry);
+    if (entry === 'jest') {
+      fs.cpSync(src, dest, { recursive: true });
+    } else {
+      fs.symlinkSync(src, dest, 'dir');
+    }
+  }
+}
+
 function initRepo(prefix) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   git(root, 'git init -b main -q');
@@ -426,5 +441,170 @@ describe('programmatic coverage API', () => {
       expect(error.code).toBe('INVALID_FILTER');
       expect(error.hint).toMatch(/regular expression/i);
     }
+  });
+
+  it('validates engine, discoveryWorkers, fallback, and incompatible Jest flags', () => {
+    root = initRepo('mo3ta-engine-validation-');
+    writeMathFeature(root);
+
+    for (const [opts, expectedCode] of [
+      [{ mode: 'smart', engine: 'vitest' }, 'INVALID_ENGINE'],
+      [{ mode: 'fast', engine: 'jest' }, 'INVALID_ENGINE_MODE'],
+      [{ mode: 'full', engine: 'jest' }, 'INVALID_ENGINE_MODE'],
+      [{ mode: 'smart', discoveryWorkers: 0 }, 'INVALID_DISCOVERY_WORKERS'],
+      [{ mode: 'smart', discoveryWorkers: 17 }, 'INVALID_DISCOVERY_WORKERS'],
+      [{ mode: 'smart', discoveryWorkers: '2abc' }, 'INVALID_DISCOVERY_WORKERS'],
+      [{ mode: 'smart', fallback: 'ignore' }, 'INVALID_FALLBACK'],
+      [{ mode: 'smart', engine: 'jest', jest: ['--findRelatedTests'] }, 'INVALID_JEST_FLAG_FOR_ENGINE'],
+      [{ mode: 'smart', engine: 'jest', jest: ['--watch'] }, 'INVALID_JEST_FLAG_FOR_ENGINE']
+    ]) {
+      let caught = null;
+      try {
+        mapRelatedTests({ root, base: 'main', files: ['src/math.js'], useConfig: false, ...opts });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(Mo3taError);
+      expect(caught.code).toBe(expectedCode);
+    }
+  });
+
+  it('throws JEST_NOT_FOUND when engine is jest and Jest is not installed', () => {
+    root = initRepo('mo3ta-engine-no-jest-');
+    writeMathFeature(root);
+
+    let caught = null;
+    try {
+      mapRelatedTests({
+        root,
+        base: 'main',
+        files: ['src/math.js'],
+        mode: 'smart',
+        engine: 'jest',
+        useConfig: false
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Mo3taError);
+    expect(caught.code).toBe('JEST_NOT_FOUND');
+    expect(caught.hint).toBeTruthy();
+  });
+
+  it('reads engine, discoveryWorkers, and fallback from .mo3ta-coverage.json and ignores saved engine: jest when mode is fast', () => {
+    root = initRepo('mo3ta-engine-config-');
+    writeMathFeature(root);
+    fs.writeFileSync(path.join(root, '.mo3ta-coverage.json'), JSON.stringify({
+      base: 'main',
+      mode: 'smart',
+      engine: 'jest',
+      discoveryWorkers: 4,
+      fallback: 'native'
+    }));
+
+    const fastOverride = mapRelatedTests({
+      root,
+      files: ['src/math.js'],
+      mode: 'fast'
+    });
+    expect(fastOverride.mode).toBe('fast');
+    expect(fastOverride.engine).toBeNull();
+    expect(fastOverride.testsToRun).toContain('src/math.test.js');
+
+    const fallbackFromConfig = mapRelatedTests({
+      root,
+      files: ['src/math.js']
+    });
+    expect(fallbackFromConfig.requestedEngine).toBe('jest');
+    expect(fallbackFromConfig.engine).toBe('native');
+    expect(fallbackFromConfig.fallbackUsed).toBe(true);
+    expect(fallbackFromConfig.warnings.length).toBeGreaterThan(0);
+
+    const listed = listChangedFiles({
+      root,
+      files: ['src/math.js']
+    });
+    expect(listed.engine).toBe('jest');
+    expect(listed.discoveryWorkers).toBe(4);
+    expect(listed.fallback).toBe('native');
+  });
+
+  it('falls back to native discovery with a warning when fallback is native and Jest is missing', () => {
+    root = initRepo('mo3ta-engine-fallback-');
+    writeMathFeature(root);
+
+    const mapped = mapRelatedTests({
+      root,
+      base: 'main',
+      files: ['src/math.js'],
+      mode: 'smart',
+      engine: 'jest',
+      fallback: 'native',
+      useConfig: false
+    });
+    expect(mapped.requestedEngine).toBe('jest');
+    expect(mapped.engine).toBe('native');
+    expect(mapped.fallbackUsed).toBe(true);
+    expect(mapped.warnings.length).toBeGreaterThan(0);
+    expect(mapped.warning).toBeTruthy();
+    expect(mapped.testsToRun).toEqual(['src/math.test.js']);
+    expect(mapped.summary).toContain('fell back');
+  });
+
+  it('maps and checks coverage with engine: jest on a Jest 30 fixture', () => {
+    root = initRepo('mo3ta-engine-jest30-');
+    writeMathFeature(root);
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({
+      name: 'mo3ta-engine-jest30-fixture',
+      jest: {
+        testEnvironment: 'node',
+        transform: {},
+        coverageReporters: ['lcov', 'text-summary']
+      }
+    }));
+    git(root, 'git add package.json && git commit -q -m pkg');
+    linkFixtureNodeModules(root);
+
+    const mapped = mapRelatedTests({
+      root,
+      base: 'main',
+      files: ['src/math.js'],
+      mode: 'smart',
+      engine: 'jest',
+      explain: true,
+      useConfig: false
+    });
+    expect(mapped.engine).toBe('jest');
+    expect(mapped.requestedEngine).toBe('jest');
+    expect(mapped.fallbackUsed).toBe(false);
+    expect(mapped.jestVersion).toMatch(/^30\./);
+    expect(mapped.metrics).toBeTruthy();
+    expect(mapped.testsToRun).toEqual(['src/math.test.js']);
+    expect(Array.isArray(mapped.explanation)).toBe(true);
+    expect(mapped.explanation.length).toBeGreaterThan(0);
+    expect(mapped.summary).toContain('engine: jest');
+
+    const checked = checkChangedLineCoverage({
+      root,
+      base: 'main',
+      files: ['src/math.js'],
+      mode: 'smart',
+      engine: 'jest',
+      explain: true,
+      limit: 100,
+      useConfig: false
+    });
+    expect(checked.engine).toBe('jest');
+    expect(checked.requestedEngine).toBe('jest');
+    expect(checked.fallbackUsed).toBe(false);
+    expect(checked.jestVersion).toMatch(/^30\./);
+    expect(checked.metrics).toBeTruthy();
+    expect(Array.isArray(checked.explanation)).toBe(true);
+    expect(checked.coveragePassed).toBe(false);
+    const math = checked.files.find(file => file.file === 'src/math.js');
+    expect(math).toBeTruthy();
+    expect(math.uncovered).toEqual(expect.arrayContaining([
+      expect.objectContaining({ line: 5, text: '  return a - b;' })
+    ]));
   });
 });

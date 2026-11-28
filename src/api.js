@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { checkBaseRef, checkGitRepository } from './gitUtils.js';
 import { clearScanCaches, separateSourceAndTestFiles } from './fileUtils.js';
+import { validateJestEngineFlags } from './engines/jestEngine.js';
 import {
   analyzeChangedFile,
   buildMarkdownCoverageReport,
@@ -101,7 +102,7 @@ function readProjectConfig(root, useConfig) {
     throw new Mo3taError(
       `Could not parse ${configPath}: ${error.message}`,
       'INVALID_CONFIG',
-      'Fix .mo3ta-coverage.json or call the tool with useConfig: false. The file only supplies base, mode, depth, jest, and filter.'
+      'Fix .mo3ta-coverage.json or call the tool with useConfig: false. The file only supplies base, mode, depth, engine, discoveryWorkers, fallback, jest, and filter.'
     );
   }
 
@@ -118,6 +119,9 @@ function readProjectConfig(root, useConfig) {
       base: parsed.base,
       mode: parsed.mode,
       depth: parsed.depth,
+      engine: parsed.engine,
+      discoveryWorkers: parsed.discoveryWorkers,
+      fallback: parsed.fallback,
       jest: parsed.jest,
       filter: parsed.filter
     },
@@ -125,6 +129,14 @@ function readProjectConfig(root, useConfig) {
     found: true,
     used: true
   };
+}
+
+function toMo3taError(error) {
+  if (error instanceof Mo3taError) return error;
+  if (error && error.code) {
+    return new Mo3taError(error.message || String(error), error.code, error.hint || null);
+  }
+  return error;
 }
 
 function parseMode(explicit, configMode) {
@@ -156,6 +168,79 @@ function parseDepth(explicit, configDepth, mode) {
     );
   }
   return depth;
+}
+
+function parseEngine(explicit, configEngine, mode) {
+  if (mode !== 'smart') {
+    if (explicit !== undefined && explicit !== null && explicit !== '') {
+      const norm = String(explicit).toLowerCase();
+      if (norm !== 'native' && norm !== 'jest') {
+        throw new Mo3taError(
+          `Invalid engine: ${explicit}. Expected one of: native, jest.`,
+          'INVALID_ENGINE',
+          'engine can be "native" (default) or "jest" (opt-in Jest dependency graph discovery in smart mode).'
+        );
+      }
+      if (norm === 'jest') {
+        throw new Mo3taError(
+          "engine: 'jest' is only supported in smart mode.",
+          'INVALID_ENGINE_MODE',
+          'Use mode "smart" with engine "jest", or omit engine when using "fast" or "full" mode.'
+        );
+      }
+    }
+    return null;
+  }
+
+  const raw = explicit !== undefined && explicit !== null && explicit !== ''
+    ? explicit
+    : (configEngine || 'native');
+  const engine = String(raw).toLowerCase();
+  if (!['native', 'jest'].includes(engine)) {
+    throw new Mo3taError(
+      `Invalid engine: ${raw}. Expected one of: native, jest.`,
+      'INVALID_ENGINE',
+      'engine can be "native" (default) or "jest" (opt-in Jest dependency graph discovery in smart mode).'
+    );
+  }
+  return engine;
+}
+
+function parseDiscoveryWorkers(explicit, configWorkers) {
+  const raw = explicit !== undefined && explicit !== null && explicit !== ''
+    ? explicit
+    : (configWorkers !== undefined && configWorkers !== null && configWorkers !== '' ? configWorkers : 2);
+  let workers;
+  if (typeof raw === 'number') {
+    workers = Number.isInteger(raw) ? raw : NaN;
+  } else if (typeof raw === 'string' && /^\d+$/.test(raw.trim())) {
+    workers = Number.parseInt(raw.trim(), 10);
+  } else {
+    workers = NaN;
+  }
+  if (!Number.isInteger(workers) || workers < 1 || workers > 16) {
+    throw new Mo3taError(
+      `Invalid discoveryWorkers: ${raw}. Expected an integer between 1 and 16.`,
+      'INVALID_DISCOVERY_WORKERS',
+      'discoveryWorkers controls parallel workers during Jest dependency discovery (default 2, range 1 to 16).'
+    );
+  }
+  return workers;
+}
+
+function parseFallback(explicit, configFallback) {
+  const raw = explicit !== undefined && explicit !== null && explicit !== ''
+    ? explicit
+    : (configFallback || 'error');
+  const fallback = String(raw).toLowerCase();
+  if (!['error', 'native'].includes(fallback)) {
+    throw new Mo3taError(
+      `Invalid fallback: ${raw}. Expected one of: error, native.`,
+      'INVALID_FALLBACK',
+      'fallback can be "error" (default, fail when Jest discovery fails) or "native" (fall back to native import-graph discovery with a warning).'
+    );
+  }
+  return fallback;
 }
 
 function parseLimit(value) {
@@ -228,6 +313,10 @@ function openRepo(options = {}) {
   const { config, configPath, found, used } = readProjectConfig(root, options.useConfig);
   const mode = parseMode(options.mode, config.mode);
   const depth = parseDepth(options.depth, config.depth, mode);
+  const engine = parseEngine(options.engine, config.engine, mode);
+  const discoveryWorkers = parseDiscoveryWorkers(options.discoveryWorkers, config.discoveryWorkers);
+  const fallback = parseFallback(options.fallback, config.fallback);
+  const explain = options.explain === true || options.explain === 'true';
   const limit = parseLimit(options.limit);
   const timeoutMs = parseTimeout(options.timeoutMs);
   const base = options.base !== undefined && options.base !== null && options.base !== ''
@@ -252,6 +341,17 @@ function openRepo(options = {}) {
     throw error;
   }
 
+  const jestArgs = parseJestArgs(
+    options.jest !== undefined && options.jest !== null ? options.jest : config.jest
+  );
+  if (engine === 'jest') {
+    try {
+      validateJestEngineFlags(jestArgs);
+    } catch (error) {
+      throw toMo3taError(error);
+    }
+  }
+
   assertGitRepo(root);
   assertBase(base, root);
 
@@ -260,13 +360,15 @@ function openRepo(options = {}) {
     base,
     mode,
     depth,
+    engine,
+    discoveryWorkers,
+    fallback,
+    explain,
     limit,
     lcov: options.lcov ? String(options.lcov) : DEFAULT_LCOV,
     runTests: options.runTests !== false && options.runTests !== 'false',
     showCovered: options.showCovered === true || options.showCovered === 'true',
-    jestArgs: parseJestArgs(
-      options.jest !== undefined && options.jest !== null ? options.jest : config.jest
-    ),
+    jestArgs,
     filter,
     timeoutMs,
     ciReport: options.ciReport ? String(options.ciReport) : null,
@@ -318,7 +420,9 @@ function selectInputFiles(ctx, options) {
 
   try {
     return {
-      files: listChangedSourceFiles(ctx.base, ctx.root),
+      files: listChangedSourceFiles(ctx.base, ctx.root, {
+        includeSnapshots: ctx.mode === 'smart' && ctx.engine === 'jest'
+      }),
       detection: 'git',
       warning: null
     };
@@ -347,6 +451,10 @@ function settingsView(ctx) {
     base: ctx.base,
     mode: ctx.mode,
     depth: ctx.depth,
+    engine: ctx.engine,
+    discoveryWorkers: ctx.discoveryWorkers,
+    fallback: ctx.fallback,
+    explain: ctx.explain,
     limit: ctx.limit,
     lcov: ctx.lcov,
     jestArgs: ctx.jestArgs,
@@ -441,18 +549,49 @@ function summarizeList(result) {
   return [head, ...lines].join('\n');
 }
 
+function resolvePlan(ctx, files) {
+  try {
+    return resolveTestPlan(
+      files,
+      ctx.mode,
+      ctx.depth ?? 2,
+      ctx.root,
+      ctx.jestArgs,
+      ctx.filter,
+      {
+        engine: ctx.engine,
+        discoveryWorkers: ctx.discoveryWorkers,
+        explain: ctx.explain,
+        fallback: ctx.fallback,
+        discoveryTimeoutMs: ctx.timeoutMs
+      }
+    );
+  } catch (error) {
+    throw toMo3taError(error);
+  }
+}
+
 function summarizePlan(result) {
+  const engineNote = result.mode === 'smart' && result.engine
+    ? `, engine: ${result.engine}`
+    : '';
   const header = result.delegatedToJest
     ? `full mode passes ${result.jestTargets.length} changed file(s) to jest --findRelatedTests. Without running Jest, only ${result.testsToRun.length} changed test file(s) are known.`
-    : `${result.testsToRun.length} test file(s) selected in ${result.mode} mode${result.mode === 'smart' ? ` (depth ${result.depth})` : ''}.`;
+    : `${result.testsToRun.length} test file(s) selected in ${result.mode} mode${result.mode === 'smart' ? ` (depth ${result.depth}${engineNote})` : ''}.`;
   const filterLine = result.filter
     ? `Filter /${result.filter}/ kept ${result.testsToRun.length} of ${result.allTestsToRun.length} candidate test file(s).`
     : null;
+  const fallbackLine = result.fallbackUsed
+    ? `Requested engine "${result.requestedEngine}" fell back to "${result.engine}".`
+    : null;
+  const warningLines = Array.isArray(result.warnings) && result.warnings.length > 0
+    ? result.warnings
+    : (result.warning ? [result.warning] : []);
   const mappingLines = result.mappings.slice(0, 30).map(mapping => {
     if (mapping.tests.length === 0) return `- ${mapping.source} → no test file (${mapping.matchType})`;
     return `- ${mapping.source} → ${mapping.tests.join(', ')} (${mapping.matchType})`;
   });
-  return [header, filterLine, result.warning, ...mappingLines].filter(Boolean).join('\n');
+  return [header, filterLine, fallbackLine, ...warningLines, ...mappingLines].filter(Boolean).join('\n');
 }
 
 function summarizeCheck(result) {
@@ -469,6 +608,9 @@ function summarizeCheck(result) {
         ...file.uncovered.slice(0, 6).map(snippet => `  ${file.file}:${snippet.line}  ${snippet.text}`)
       ])
     ];
+    if (result.fallbackUsed) {
+      lines.unshift(`Requested engine "${result.requestedEngine}" fell back to "${result.engine}".`);
+    }
     return lines.join('\n');
   }
 
@@ -479,6 +621,14 @@ function summarizeCheck(result) {
     `Changed-line coverage ${status}: ${percent} (limit ${result.limit}%).`,
     `${result.totals.covered} of ${result.totals.changed} coverable changed lines covered; ${result.totals.uncovered} uncovered.`
   ];
+  if (result.mode === 'smart' && (result.engine === 'jest' || result.fallbackUsed)) {
+    const versionPart = result.jestVersion ? ` (Jest ${result.jestVersion})` : '';
+    const fallbackPart = result.fallbackUsed ? ` (fallback from ${result.requestedEngine})` : '';
+    lines.push(`Discovery engine: ${result.engine}${versionPart}${fallbackPart}.`);
+  }
+  if (result.warnings && result.warnings.length > 0) {
+    lines.push(...result.warnings);
+  }
   if (result.testsFailed) {
     lines.push('Jest reported failures. The line results below are from the lcov file it left behind.');
   }
@@ -499,18 +649,24 @@ function summarizeCheck(result) {
 }
 
 function presentPlan(ctx, selected, plan) {
-  const warning = [
+  const fullModeWarning = plan.delegatedToJest
+    ? 'full mode discovers related tests inside Jest --findRelatedTests. This list is only the changed test files, which is all --dryRun can know without running Jest.'
+    : null;
+  const warnings = [
     selected.warning,
-    plan.delegatedToJest
-      ? 'full mode discovers related tests inside Jest --findRelatedTests. This list is only the changed test files, which is all --dryRun can know without running Jest.'
-      : null
-  ].filter(Boolean).join(' ') || null;
+    ...(plan.warnings || []),
+    fullModeWarning
+  ].filter(Boolean);
+  const warning = warnings.join(' ') || null;
   const result = {
     ok: true,
     root: ctx.root,
     base: ctx.base,
     mode: ctx.mode,
     depth: ctx.depth,
+    engine: plan.engine ?? ctx.engine,
+    requestedEngine: plan.requestedEngine ?? ctx.engine,
+    fallbackUsed: Boolean(plan.fallbackUsed),
     detection: selected.detection,
     delegatedToJest: plan.delegatedToJest,
     sourceFiles: plan.sourceFiles,
@@ -524,6 +680,11 @@ function presentPlan(ctx, selected, plan) {
     allTestsToRun: plan.allTestsToRun,
     testsToRun: plan.testsToRun,
     jestTargets: plan.jestTargets,
+    metrics: plan.metrics ?? null,
+    projects: plan.projects ?? null,
+    jestVersion: plan.jestVersion ?? null,
+    explanation: plan.explanation ?? null,
+    warnings,
     warning
   };
   result.summary = summarizePlan(result);
@@ -559,7 +720,7 @@ export function listChangedFiles(options = {}) {
 export function mapRelatedTests(options = {}) {
   const ctx = openRepo(options);
   const selected = selectInputFiles(ctx, options);
-  const plan = resolveTestPlan(selected.files, ctx.mode, ctx.depth ?? 2, ctx.root, ctx.jestArgs, ctx.filter);
+  const plan = resolvePlan(ctx, selected.files);
   return presentPlan(ctx, selected, plan);
 }
 
@@ -681,6 +842,8 @@ export function checkChangedLineCoverage(options = {}) {
     const result = {
       ok: true,
       ...settingsView(ctx),
+      requestedEngine: ctx.engine,
+      fallbackUsed: false,
       runTests: ctx.runTests,
       detection: selected.detection,
       noChangedFiles: true,
@@ -689,6 +852,10 @@ export function checkChangedLineCoverage(options = {}) {
       coveragePassed: true,
       cliWouldExit: 0,
       warnings,
+      metrics: null,
+      projects: null,
+      jestVersion: null,
+      explanation: null,
       files: [],
       totals: { changed: 0, covered: 0, uncovered: 0, coverage: null },
       jest: { ran: false, testsFailed: false, outputTail: '', outputTruncated: false }
@@ -697,7 +864,8 @@ export function checkChangedLineCoverage(options = {}) {
     return result;
   }
 
-  const plan = resolveTestPlan(selected.files, ctx.mode, ctx.depth ?? 2, ctx.root, ctx.jestArgs, ctx.filter);
+  const plan = resolvePlan(ctx, selected.files);
+  const mergedWarnings = [...warnings, ...(plan.warnings || [])];
   const nothingToRun = plan.delegatedToJest
     ? plan.jestTargets.length === 0
     : plan.testsToRun.length === 0;
@@ -707,6 +875,9 @@ export function checkChangedLineCoverage(options = {}) {
     const result = {
       ok: false,
       ...settingsView(ctx),
+      engine: plan.engine ?? ctx.engine,
+      requestedEngine: plan.requestedEngine ?? ctx.engine,
+      fallbackUsed: Boolean(plan.fallbackUsed),
       runTests: true,
       detection: selected.detection,
       noChangedFiles: false,
@@ -715,13 +886,21 @@ export function checkChangedLineCoverage(options = {}) {
       coveragePassed: null,
       cliWouldExit: 0,
       warnings: [
-        ...warnings,
+        ...mergedWarnings,
         'No test files were selected, so Jest did not run. The CLI exits 0 in this case and never measures coverage. Add a test that imports the changed file.' +
         (plan.filter ? ` All candidate test files were dropped by the filter /${plan.filter}/.` : '')
       ],
-      mappings: plan.mappings,
+      mappings: plan.mappings.map(mapping => ({
+        source: mapping.source,
+        matchType: mapping.matchType,
+        tests: mapping.tests
+      })),
       testsToRun: plan.testsToRun,
       allTestsToRun: plan.allTestsToRun,
+      metrics: plan.metrics ?? null,
+      projects: plan.projects ?? null,
+      jestVersion: plan.jestVersion ?? null,
+      explanation: plan.explanation ?? null,
       files: filesWithoutCoverageRun(ctx, plan, budget),
       totals: { changed: 0, covered: 0, uncovered: 0, coverage: null },
       jest: { ran: false, testsFailed: false, outputTail: '', outputTruncated: false }
@@ -776,6 +955,9 @@ export function checkChangedLineCoverage(options = {}) {
   const result = {
     ok: coveragePassed && !jest.testsFailed,
     ...settingsView(ctx),
+    engine: plan.engine ?? ctx.engine,
+    requestedEngine: plan.requestedEngine ?? ctx.engine,
+    fallbackUsed: Boolean(plan.fallbackUsed),
     runTests: ctx.runTests,
     detection: selected.detection,
     noChangedFiles: false,
@@ -783,7 +965,7 @@ export function checkChangedLineCoverage(options = {}) {
     testsNotRunReason: ctx.runTests ? null : 'runTests-false',
     coveragePassed,
     cliWouldExit,
-    warnings,
+    warnings: mergedWarnings,
     ciReport: ctx.ciReport ? path.resolve(ctx.root, ctx.ciReport) : null,
     filter: plan.filter,
     mappings: plan.mappings.map(mapping => ({
@@ -793,6 +975,10 @@ export function checkChangedLineCoverage(options = {}) {
     })),
     testsToRun: plan.testsToRun,
     allTestsToRun: plan.allTestsToRun,
+    metrics: plan.metrics ?? null,
+    projects: plan.projects ?? null,
+    jestVersion: plan.jestVersion ?? null,
+    explanation: plan.explanation ?? null,
     files,
     totals: {
       changed: totals.totalChanged,

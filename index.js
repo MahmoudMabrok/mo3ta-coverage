@@ -57,7 +57,11 @@ program
   .option('--ci <bool>', 'CI mode: print results as a markdown table and save it to a file for CI to read', false)
   .option('--ciReport <path>', 'Where to save the CI markdown table', 'coverage/mo3ta-coverage-report.md')
   .option('--mode <mode>', 'Execution mode: fast, smart, or full', 'smart')
+  .option('--engine <engine>', 'Smart-mode dependency engine: native (default) or jest', 'native')
   .option('--depth <number>', 'Smart mode max reverse-dependency depth (1 = direct importers, 2 = also importers of importers)', '2')
+  .option('--discoveryWorkers <number>', 'Discovery worker concurrency for --engine jest (1-16)', '2')
+  .option('--explain [bool]', 'Include dependency path explanations for selected tests', false)
+  .option('--fallback <policy>', 'Behavior when --engine jest discovery fails: error (default) or native', 'error')
   .option('--files <files...>', 'Scan only these files instead of detecting changed files (space- or comma-separated)')
   .option('--filesFrom <path>', 'Read the list of files to scan from a newline-separated file')
   .addOption(new Option('--jest <value>', 'Extra Jest CLI flag, e.g. --maxWorkers=2 (repeatable or comma-separated)').argParser(collectJest))
@@ -70,6 +74,9 @@ program.showHelpAfterError('(add --help for a list of options)');
 program.addHelpText('after', `
 Examples:
 $ mo3ta-coverage --mode smart --base origin/main --limit 80
+$ mo3ta-coverage --mode smart --engine jest --depth 2 --base origin/main
+$ mo3ta-coverage --mode smart --engine jest --explain true --base origin/main
+$ mo3ta-coverage --mode smart --engine jest --fallback native --base origin/main
 $ mo3ta-coverage --files src/a.js,src/b.ts --base origin/main
 $ mo3ta-coverage --filesFrom changed.txt --base origin/main
 $ mo3ta-coverage --dryRun true --files src/a.js,src/b.ts --base main
@@ -77,12 +84,12 @@ $ mo3ta-coverage --mode fast --showCovered true
 $ mo3ta-coverage --mode smart --base origin/main --ci true --ciReport coverage/report.md
 $ mo3ta-coverage --base origin/main --jest --maxWorkers=2 --jest --silent
 $ mo3ta-coverage --base origin/main --filter "src/__tests__/login"
-$ mo3ta-coverage config --mode smart --depth 2
+$ mo3ta-coverage config --mode smart --engine jest --depth 2
 $ mo3ta-coverage --version
 
 Modes:
   fast   Naming-convention matches, plus a direct import-scan fallback.
-  smart  Naming + reverse-import walk, bounded by --depth (default 2).
+  smart  Naming + reverse-import walk (native) or Jest HasteFS dependency graph (--engine jest), bounded by --depth (default 2).
   full   Passes changed files to "jest --findRelatedTests".
 
 See README.md for details: https://github.com/MahmoudMabrok/mo3ta-coverage`);
@@ -93,7 +100,10 @@ const configCommand = program
   .description('Set or get configuration options')
   .option('--base <branch>', 'Set default base branch')
   .option('--mode <mode>', 'Set default mode (fast/smart/full)')
+  .option('--engine <engine>', 'Set default smart-mode engine (native/jest)')
   .option('--depth <number>', 'Set default smart-mode depth (1-10)')
+  .option('--discoveryWorkers <number>', 'Set default discovery worker concurrency (1-16)')
+  .option('--fallback <policy>', 'Set default fallback policy when Jest discovery fails (error/native)')
   .addOption(new Option('--jest <value>', 'Set default extra Jest CLI flag, e.g. --maxWorkers=2 (repeatable or comma-separated)').argParser(collectJest))
   .option('--filter <regex>', 'Set default spec filter regex matched against the final selected spec files')
   .action((opts) => {
@@ -120,6 +130,17 @@ const configCommand = program
       console.log(`Default mode set to: ${config.mode}`);
     }
 
+    if (opts.engine !== undefined) {
+      const normalizedEngine = String(opts.engine).toLowerCase();
+      if (!['native', 'jest'].includes(normalizedEngine)) {
+        console.error(`Invalid engine: ${opts.engine}. Expected one of: native, jest.`);
+        process.exit(1);
+      }
+      config.engine = normalizedEngine;
+      updated = true;
+      console.log(`Default smart-mode engine set to: ${config.engine}`);
+    }
+
     if (opts.depth !== undefined) {
       const normalizedDepth = Number.parseInt(opts.depth, 10);
       if (!Number.isInteger(normalizedDepth) || normalizedDepth < 1 || normalizedDepth > 10) {
@@ -129,6 +150,29 @@ const configCommand = program
       config.depth = normalizedDepth;
       updated = true;
       console.log(`Default smart-mode depth set to: ${config.depth}`);
+    }
+
+    if (opts.discoveryWorkers !== undefined) {
+      const rawWorkers = String(opts.discoveryWorkers).trim();
+      const normalizedWorkers = /^\d+$/.test(rawWorkers) ? Number.parseInt(rawWorkers, 10) : NaN;
+      if (!Number.isInteger(normalizedWorkers) || normalizedWorkers < 1 || normalizedWorkers > 16) {
+        console.error(`Invalid discoveryWorkers: ${opts.discoveryWorkers}. Expected an integer between 1 and 16.`);
+        process.exit(1);
+      }
+      config.discoveryWorkers = normalizedWorkers;
+      updated = true;
+      console.log(`Default discovery workers set to: ${config.discoveryWorkers}`);
+    }
+
+    if (opts.fallback !== undefined) {
+      const normalizedFallback = String(opts.fallback).toLowerCase();
+      if (!['error', 'native'].includes(normalizedFallback)) {
+        console.error(`Invalid fallback: ${opts.fallback}. Expected one of: error, native.`);
+        process.exit(1);
+      }
+      config.fallback = normalizedFallback;
+      updated = true;
+      console.log(`Default Jest discovery fallback set to: ${config.fallback}`);
     }
 
     if (configCommand.getOptionValueSource('filter') === 'cli') {
@@ -160,6 +204,10 @@ program.action((opts) => {
   const modeFromCli = program.getOptionValueSource('mode') === 'cli';
   const depthFromCli = program.getOptionValueSource('depth') === 'cli';
   const jestFromCli = program.getOptionValueSource('jest') === 'cli';
+  const engineFromCli = program.getOptionValueSource('engine') === 'cli';
+  const discoveryWorkersFromCli = program.getOptionValueSource('discoveryWorkers') === 'cli';
+  const fallbackFromCli = program.getOptionValueSource('fallback') === 'cli';
+  const explainFromCli = program.getOptionValueSource('explain') === 'cli';
 
   // Use config base if not provided in CLI
   if (!options.base && config.base) {
@@ -185,6 +233,48 @@ program.action((opts) => {
     console.error(`Invalid mode: ${options.mode}. Expected one of: fast, smart, full.`);
     process.exit(1);
   }
+
+  const candidateEngine = engineFromCli
+    ? options.engine
+    : (config.engine !== undefined && config.engine !== null ? config.engine : options.engine);
+  const normalizedEngine = String(candidateEngine || 'native').toLowerCase();
+  if (!['native', 'jest'].includes(normalizedEngine)) {
+    console.error(`Invalid engine: ${candidateEngine}. Expected one of: native, jest.`);
+    process.exit(1);
+  }
+
+  if (engineFromCli && normalizedEngine === 'jest' && options.mode !== 'smart') {
+    console.error(`--engine jest is only supported in smart mode (got mode: ${options.mode}).`);
+    process.exit(1);
+  }
+
+  options.engine = options.mode === 'smart' ? normalizedEngine : null;
+
+  const rawWorkers = discoveryWorkersFromCli
+    ? options.discoveryWorkers
+    : (config.discoveryWorkers !== undefined && config.discoveryWorkers !== null ? config.discoveryWorkers : options.discoveryWorkers);
+  const workersStr = String(rawWorkers).trim();
+  const discoveryWorkers = /^\d+$/.test(workersStr) ? Number.parseInt(workersStr, 10) : NaN;
+  if (!Number.isInteger(discoveryWorkers) || discoveryWorkers < 1 || discoveryWorkers > 16) {
+    console.error(`Invalid discoveryWorkers: ${rawWorkers}. Expected an integer between 1 and 16.`);
+    process.exit(1);
+  }
+  options.discoveryWorkers = discoveryWorkers;
+
+  const rawFallback = fallbackFromCli
+    ? options.fallback
+    : (config.fallback !== undefined && config.fallback !== null ? config.fallback : options.fallback);
+  const fallback = String(rawFallback || 'error').toLowerCase();
+  if (!['error', 'native'].includes(fallback)) {
+    console.error(`Invalid fallback: ${rawFallback}. Expected one of: error, native.`);
+    process.exit(1);
+  }
+  options.fallback = fallback;
+
+  const rawExplain = explainFromCli
+    ? options.explain
+    : (config.explain !== undefined && config.explain !== null ? config.explain : options.explain);
+  options.explain = rawExplain === true || rawExplain === 'true';
 
   if (options.mode === 'smart') {
     if (!depthFromCli && config.depth !== undefined) {

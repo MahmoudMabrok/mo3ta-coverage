@@ -18,7 +18,8 @@ A quick walkthrough of changed-file detection, related-test selection, and chang
 - Accepts an explicit file list (`--files` / `--filesFrom`) to control what gets scanned
 - Maps changed source files to related test files, even when names differ
 - Supports three execution modes: `fast`, `smart`, and `full`
-- Walks reverse imports in `smart` mode to a configurable depth (default `2`)
+- Walks reverse imports in `smart` mode to a configurable depth (default `2`) with either the zero-dependency `native` engine (default) or the opt-in `jest` engine (Jest 29/30 HasteFS + DependencyResolver)
+- Explains why each test was selected (`--explain`) and supports configurable fallback (`--fallback native`) when `--engine jest` cannot initialize
 - Parses `lcov.info` and reports uncovered changed lines
 - Enforces a minimum coverage threshold for changed lines
 - `--dryRun` lists the test files that would run (machine-readable, for other tools)
@@ -77,6 +78,10 @@ jobs:
 All inputs, and how to scope the run to specific files (`files` /
 `files-from`), are documented in the
 [action README](https://github.com/MahmoudMabrok/mo3ta-coverage-action#inputs).
+Input forwarding for `--engine`, `--discoveryWorkers`, `--explain`, and
+`--fallback` is tracked separately in the
+[`mo3ta-coverage-action`](https://github.com/MahmoudMabrok/mo3ta-coverage-action)
+repository.
 
 ## Installation
 
@@ -165,7 +170,24 @@ npx github:MahmoudMabrok/mo3ta-coverage \
 
 `smart` follows reverse imports up to `--depth` (default `2`), which catches
 specs that reach the changed file through barrel files. See
-[Modes](#modes) for `fast`, `smart`, and `full`.
+[Modes](#modes) for `fast`, `smart`, and `full`, and `--engine` for `native` vs `jest`.
+
+### 3. Opt into the Jest discovery engine with `--explain` and `--fallback`
+
+For repos using custom Jest resolvers, `moduleNameMapper`, manual `__mocks__`,
+React Native platform extensions, multi-project configs, or `.snap` snapshot
+mapping, opt into `--engine jest` in `smart` mode:
+
+```sh
+mo3ta-coverage \
+  --mode smart \
+  --engine jest \
+  --discoveryWorkers 4 \
+  --explain \
+  --fallback native \
+  --base origin/main \
+  --limit 80
+```
 
 ## CLI Options
 
@@ -177,6 +199,10 @@ specs that reach the changed file through barrel files. See
 | `--showCovered <bool>` | Show covered changed lines in output | `false` |
 | `--mode <mode>` | Execution mode: `fast`, `smart`, or `full` | `smart` |
 | `--depth <number>` | Max reverse-import depth used by `smart` (`1` or `2` recommended) | `2` |
+| `--engine <engine>` | Discovery engine for `smart` mode: `native` (default) or `jest` (opt-in) | `native` |
+| `--discoveryWorkers <number>` | Worker count for Jest HasteMap discovery (`1`–`16`, used by `--engine jest`) | `2` |
+| `--explain [bool]` | Print dependency chain explanations from changed files to selected tests (`smart` mode) | `false` |
+| `--fallback <policy>` | Fallback policy when `--engine jest` fails: `error` or `native` | `error` |
 | `--files <files...>` | Scan only these files instead of auto-detecting changed files (space- or comma-separated) | – |
 | `--filesFrom <path>` | Read the file list to scan from a newline-separated file | – |
 | `--jest <value>` | Extra Jest CLI flag passed through to the run, e.g. `--maxWorkers=2`. Repeatable or comma-separated | – |
@@ -366,11 +392,20 @@ src/math.spec.js
 reverse-import walk finds it at depth 2. Only the selected path reaches
 stdout; the diagnostics (changed files, mode, depth) go to stderr.
 
-## Modes
+## Modes & Engines
 
 - `fast`: Naming-convention matches only, plus a direct import-scan fallback. No dependency traversal.
-- `smart`: Naming-convention matches plus a reverse-import walk from each changed file, limited by `--depth`. This finds spec files whose names differ and tests that reach the changed file through intermediate modules such as barrel `index.js` files. No Jest dependency traversal.
+- `smart` (default): Naming-convention matches plus a reverse-import walk from each changed file, limited by `--depth` (default `2`). Supports two engines via `--engine`:
+  - `native` (default): Uses `mo3ta-coverage`'s built-in, zero-dependency filesystem scan and regex import resolver.
+  - `jest` (opt-in): Runs Jest's own HasteFS, `DependencyResolver`, `SearchSource`, and `SnapshotResolver` inside an isolated worker subprocess, then traverses the reverse graph up to `--depth`.
 - `full`: Passes the changed source and test files to `jest --findRelatedTests`, letting Jest traverse without a depth limit.
+
+| Mode + Engine | Discovery Mechanism | Traversal | Cold / Warm Speed | Jest-Specific Features | Best For |
+| --- | --- | --- | --- | --- | --- |
+| `fast` | Naming conventions + direct import scan | None | Fastest | None | Small suites or direct 1:1 spec layouts |
+| `smart` + `native` (default) | Naming + `tsconfig`/`jsconfig` + workspace `package.json` + regex import graph | Bounded (`--depth`) | Very fast cold & warm | None | Most JS/TS repos and monorepos |
+| `smart` + `jest` (opt-in) | Project-local Jest 29/30 HasteMap + `DependencyResolver` | Bounded (`--depth`) | Slower cold HasteMap, fast warm cache | Custom `resolver`, `moduleNameMapper`, `__mocks__`, RN extensions, `projects`, `.snap` | Repos relying on Jest-specific resolution or multi-project configs |
+| `full` | `jest --findRelatedTests` | Unbounded | Slower (full Jest graph) | Full Jest resolution | Intentional full-graph expansion |
 
 ### Depth in `smart` mode
 
@@ -380,10 +415,21 @@ One depth step is one import edge:
 - `--depth 2` (default): also test files that import a module which imports the changed file.
 - `--depth 3`: recommended for monorepos where cross-package imports go through a package barrel (`index.ts`) and an intermediate consumer module (`changed.ts` → `pkg/index.ts` → `app/service.ts` → `app/service.test.ts`).
 
-Both `smart` and `fast` modes resolve relative imports, `tsconfig.json` / `tsconfig.base.json` / `jsconfig.json` `paths` & `baseUrl` (including per-package `extends`), and workspace `package.json` names (`exports`, `source`, `module`, `main`).
+The `native` engine resolves relative imports, `tsconfig.json` / `tsconfig.base.json` / `jsconfig.json` `paths` & `baseUrl` (including per-package `extends`), and workspace `package.json` names (`exports`, `source`, `module`, `main`).
 
-Depth `2` is usually the sweet spot for single-package projects: it catches barrel/re-export and thin wrapper
-layers without pulling in the whole dependency graph.
+Depth `2` is usually the sweet spot for single-package projects: it catches barrel/re-export and thin wrapper layers without pulling in the whole dependency graph.
+
+### Opt-in Jest engine (`--engine jest`)
+
+When `--mode smart --engine jest` is enabled:
+
+- **Jest compatibility (29 and 30)**: `mo3ta-coverage` resolves Jest directly from the target repository's `node_modules` (supporting npm, yarn, and pnpm layouts) and refuses to fall back to `mo3ta-coverage`'s own Jest installation.
+- **Multi-project support**: Discovers across Jest `projects`, honors `--selectProjects` and `--ignoreProjects` passed via `--jest`, and automatically passes `--selectProjects` for `--runTestsByPath` execution when multiple named projects exist and only a subset matched.
+- **Snapshot mapping**: Changed `.snap` files are mapped back to their owning test files through Jest's `SnapshotResolver`.
+- **Dependency explanations (`--explain`)**: Prints the shortest dependency chain from each changed source file to each selected test file (and project name when multi-project).
+- **Graceful fallback (`--fallback`)**: Defaults to `error` so configuration or Jest errors fail fast; pass `--fallback native` to fall back to the `native` engine when `--engine jest` cannot initialize.
+- **Performance characteristics**: Unlike `native`, a cold `--engine jest` run builds Jest's HasteMap and resolves dependencies across all project files (`configMs`, `hasteMapMs`, `resolveMs`, `graphMs`, `bfsMs`). Subsequent runs with a warm Jest cache are substantially faster while still avoiding the unbounded expansion of `--mode full`.
+- **Known limitations**: Static dependency graphs in both engines cannot detect purely dynamic/computed runtime imports (`require(variable)`), and deleted or renamed files that no longer exist on disk/HasteFS are skipped with a warning. Always keep a full-suite CI run (e.g. on `main`) as a safety net.
 
 ## Recommended Mode
 
@@ -393,7 +439,7 @@ For most projects, especially large ones with shared helpers or deep import grap
 mo3ta-coverage --mode smart --base origin/main --limit 80
 ```
 
-Use `full` only when you intentionally want Jest to expand to related tests.
+Opt into `--engine jest` if your suite relies on Jest custom resolvers, `moduleNameMapper`, manual `__mocks__`, React Native platform extensions, multi-project configs, or snapshot mapping. Use `full` only when you intentionally want Jest to expand to related tests without a depth bound.
 
 ## Configuration
 
@@ -401,13 +447,15 @@ You can persist defaults with the `config` subcommand:
 
 ```sh
 mo3ta-coverage config --base origin/main --mode smart --depth 2
+# Or persist Jest engine defaults:
+mo3ta-coverage config --engine jest --discoveryWorkers 4 --fallback native
 ```
 
 This writes `.mo3ta-coverage.json` in the project root. The `base`, `mode`,
-`depth`, `jest` (extra Jest flags), and `filter` (spec filter regex) defaults
-are supported. For example, `mo3ta-coverage config --jest --maxWorkers=2`
-saves a default Jest worker cap, and
-`mo3ta-coverage config --filter "src/__tests__/login"` saves a default spec
+`depth`, `engine`, `discoveryWorkers`, `fallback`, `jest` (extra Jest flags),
+and `filter` (spec filter regex) defaults are supported. For example,
+`mo3ta-coverage config --jest --maxWorkers=2` saves a default Jest worker cap,
+and `mo3ta-coverage config --filter "src/__tests__/login"` saves a default spec
 filter.
 
 ## MCP server
@@ -416,15 +464,15 @@ filter.
 
 The server is a second bin in this package, `mo3ta-coverage-mcp`, speaking MCP over stdio. It lives here rather than in a separate package so one publish ships it, and so it imports this repo's source directly. The CLI flags, stdout, and exit codes are unchanged; the [GitHub Action](https://github.com/MahmoudMabrok/mo3ta-coverage-action) keeps running `node index.js`.
 
-The server requires Node.js 18 or newer. Each tool takes `root` (the checkout to inspect). When `root` is omitted, Claude Code's `CLAUDE_PROJECT_DIR` is used if it is set, otherwise the server process cwd. `useConfig` defaults to true: `base`, `mode`, `depth`, `jest`, and `filter` are read from `.mo3ta-coverage.json` when present, and explicit arguments override the file.
+The server requires Node.js 18 or newer. Each tool takes `root` (the checkout to inspect). When `root` is omitted, Claude Code's `CLAUDE_PROJECT_DIR` is used if it is set, otherwise the server process cwd. `useConfig` defaults to true: `base`, `mode`, `depth`, `engine`, `discoveryWorkers`, `fallback`, `jest`, and `filter` are read from `.mo3ta-coverage.json` when present, and explicit arguments override the file.
 
 | Tool | Purpose |
 | --- | --- |
 | `list_changed_files` | List JS/TS files changed versus a base ref (or an explicit list). |
-| `map_related_tests` | Map those files to the tests `fast`, `smart`, or `full` mode would run. |
+| `map_related_tests` | Map those files to the tests `fast`, `smart` (`native` or `jest`), or `full` mode would run. |
 | `check_changed_line_coverage` | Run the changed-line coverage check and return uncovered lines with source text. |
 
-`check_changed_line_coverage` runs the repo's local Jest and writes `coverage/` there, same as the CLI. Jest is killed after `timeoutMs` (default 5 minutes) and only a tail of its output is returned. Pass `runTests: false` to grade an existing `lcov.info` without running tests. Pass `jest` (an array of flags or a comma-separated string, e.g. `["--maxWorkers=4"]`) to forward extra Jest CLI flags, and `filter` (a regex) to narrow the final list of selected spec files. A missed threshold comes back as data (`ok: false` plus the uncovered lines), not a crashed tool. A missing git repo, a bad base ref, a missing Jest install, or a timeout comes back as a tool error with a `code` and a hint.
+`check_changed_line_coverage` runs the repo's local Jest and writes `coverage/` there, same as the CLI. Jest is killed after `timeoutMs` (default 5 minutes) and only a tail of its output is returned. Pass `runTests: false` to grade an existing `lcov.info` without running tests. Both `map_related_tests` and `check_changed_line_coverage` also accept `engine` (`"native"` or `"jest"`), `discoveryWorkers` (`1`–`16`), `explain` (`true`/`false`), and `fallback` (`"error"` or `"native"`). Pass `jest` (an array of flags or a comma-separated string, e.g. `["--maxWorkers=4"]`) to forward extra Jest CLI flags, and `filter` (a regex) to narrow the final list of selected spec files. A missed threshold comes back as data (`ok: false` plus the uncovered lines), not a crashed tool. A missing git repo, a bad base ref, a missing Jest install, or a timeout comes back as a tool error with a `code` and a hint.
 
 When a `filter` is used, results include `allTestsToRun` (the selected specs before the filter) and `testsToRun` (what matched), so an agent can validate that the regex kept what it expected.
 
@@ -494,8 +542,8 @@ claude mcp add mo3ta-coverage -- node /absolute/path/to/mo3ta-coverage/mcp/serve
 
 1. Reads CLI options and saved config from [index.js](index.js).
 2. Finds changed source files from git in [src/cli.js](src/cli.js).
-3. Maps source files to related test files in [src/fileUtils.js](src/fileUtils.js).
-   `smart` mode combines naming conventions with a cached reverse-import index
+3. Maps source files to related test files via [src/engines/nativeEngine.js](src/engines/nativeEngine.js) and [src/fileUtils.js](src/fileUtils.js) (default), or [src/engines/jestEngine.js](src/engines/jestEngine.js) when `--engine jest` is selected.
+   `smart` mode combines naming conventions with a reverse-import index
    and walks it up to `--depth` edges.
 4. Runs Jest in the selected mode from [src/cli.js](src/cli.js).
 5. Parses `lcov.info` and reports uncovered changed lines.

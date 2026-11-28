@@ -3,16 +3,16 @@ import fs from 'fs';
 import path from 'path';
 import { exit } from 'process';
 import { verifyBaseBranchExists, verifyGitRepoExists } from './gitUtils.js';
+import jestLoader from './engines/jestLoader.cjs';
+import { resolveNativePlan } from './engines/nativeEngine.js';
+import { resolveJestPlan } from './engines/jestEngine.js';
 
 // Set when Jest exits non-zero. `main` resets it so a later in-process call
 // does not inherit the previous failure. The CLI process still exits.
 let testsFailed = false;
 import {
   getJsOnlyFiles,
-  separateSourceAndTestFiles,
-  findTestFilesForSource,
-  findTestFilesByImport,
-  findRelatedTestFilesBySource
+  separateSourceAndTestFiles
 } from './fileUtils.js';
 
 export function main(options) {
@@ -29,6 +29,10 @@ export function main(options) {
     const SHOW_COVERED = options.showCovered === true || options.showCovered === 'true';
     const MODE = options.mode;
     const DEPTH = Number.parseInt(options.depth, 10) || 2;
+    const ENGINE = MODE === 'smart' ? (options.engine || 'native') : null;
+    const DISCOVERY_WORKERS = Number.parseInt(options.discoveryWorkers, 10) || 2;
+    const EXPLAIN = options.explain === true || options.explain === 'true';
+    const FALLBACK = options.fallback || 'error';
     const DRY_RUN = options.dryRun === true || options.dryRun === 'true';
     const CI = options.ci === true || options.ci === 'true';
     const CI_REPORT_PATH = options.ciReport
@@ -36,12 +40,18 @@ export function main(options) {
       : path.resolve('coverage', 'mo3ta-coverage-report.md');
     const JEST_FLAGS = parseJestArgs(options.jest);
     const FILTER = parseFilter(options.filter);
+    const engineOptions = {
+      engine: ENGINE,
+      discoveryWorkers: DISCOVERY_WORKERS,
+      explain: EXPLAIN,
+      fallback: FALLBACK
+    };
 
     // In dry run, stdout must stay a clean one-path-per-line list, so
     // diagnostics go to stderr instead of stdout.
     const infoLog = DRY_RUN ? console.error : console.log;
 
-    infoLog(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE} \nDepth: ${DEPTH} \nDry Run: ${DRY_RUN} \nCI Mode: ${CI} \nJest Flags: ${JEST_FLAGS.length ? JEST_FLAGS.join(' ') : '(none)'} \nFilter: ${FILTER ? FILTER.source : '(none)'}`);
+    infoLog(`Options:\nBase Branch: ${BASE_BRANCH} \nLCOV Path: ${LCOV_PATH} \nCoverage Limit: ${COVERAGE_LIMIT} \nShow Covered Lines: ${SHOW_COVERED} \nMode: ${MODE} \nEngine: ${ENGINE || '(n/a)'} \nDepth: ${DEPTH} \nDiscovery Workers: ${DISCOVERY_WORKERS} \nExplain: ${EXPLAIN} \nFallback: ${FALLBACK} \nDry Run: ${DRY_RUN} \nCI Mode: ${CI} \nJest Flags: ${JEST_FLAGS.length ? JEST_FLAGS.join(' ') : '(none)'} \nFilter: ${FILTER ? FILTER.source : '(none)'}`);
 
     const explicitFiles = getExplicitFiles(options);
     let changedFiles;
@@ -52,15 +62,17 @@ export function main(options) {
       infoLog(`Scanning ${explicitFiles.length} explicitly provided file(s) (git changed-file detection skipped):\n${explicitFiles.join('\n')}`);
       changedFiles = explicitFiles;
     } else {
-      changedFiles = getChangedFiles(BASE_BRANCH, infoLog);
+      changedFiles = getChangedFiles(BASE_BRANCH, infoLog, process.cwd(), {
+        includeSnapshots: MODE === 'smart' && ENGINE === 'jest'
+      });
     }
 
     if (DRY_RUN) {
-      dryRun(changedFiles, MODE, DEPTH, FILTER);
+      dryRun(changedFiles, MODE, DEPTH, FILTER, JEST_FLAGS, engineOptions);
       return;
     }
 
-    runRelatedTests(changedFiles, MODE, DEPTH, JEST_FLAGS, FILTER);
+    runRelatedTests(changedFiles, MODE, DEPTH, JEST_FLAGS, FILTER, engineOptions);
     reportUncoveredChangedLines(changedFiles, LCOV_PATH, BASE_BRANCH, COVERAGE_LIMIT, SHOW_COVERED, CI, CI_REPORT_PATH);
 
     if (testsFailed) {
@@ -68,10 +80,9 @@ export function main(options) {
       exit(1);
     }
   } catch (error) {
-    if (error.code === 'INVALID_FILTER') {
-      console.error(`❌ ${error.message}`);
-    } else {
-      console.error('❌ An unexpected error occurred:', error.message || error);
+    console.error(`❌ ${error.message || error}`);
+    if (error && error.hint) {
+      console.error(`   ${error.hint}`);
     }
     exit(1);
   }
@@ -202,14 +213,16 @@ export function filterTestFiles(files, filter) {
 }
 
 /**
- * Lists changed JS/TS files vs `baseBranch` without logging or exiting.
+ * Lists changed JS/TS (and optionally Jest snapshot) files vs `baseBranch`
+ * without logging or exiting.
  * Includes commits from every author since the merge base, plus staged and
  * unstaged edits. Throws when git itself fails.
  * @param {string} baseBranch
  * @param {string} [root]
+ * @param {{ includeSnapshots?: boolean }} [options]
  * @returns {string[]}
  */
-export function listChangedSourceFiles(baseBranch, root = process.cwd()) {
+export function listChangedSourceFiles(baseBranch, root = process.cwd(), options = {}) {
   // Compare the merge base with HEAD so every file changed on this branch is
   // included, regardless of which author committed it.
   //
@@ -222,6 +235,9 @@ export function listChangedSourceFiles(baseBranch, root = process.cwd()) {
   }).toString();
 
   const mergeBase = gitFiles(['merge-base', 'HEAD', baseBranch]).trim();
+  const filePattern = options?.includeSnapshots === true
+    ? /\.(js|ts|jsx|tsx|snap)$/
+    : /\.(js|ts|jsx|tsx)$/;
 
   const seen = new Set();
   const changedFiles = [
@@ -234,7 +250,7 @@ export function listChangedSourceFiles(baseBranch, root = process.cwd()) {
   ]
     .flatMap(output => output.split(/\r?\n/))
     .map(file => file.trim())
-    .filter(file => file.length > 0 && file.match(/\.(js|ts|jsx|tsx)$/))
+    .filter(file => file.length > 0 && filePattern.test(file))
     // Defensive: ignore dependency/build/coverage artifacts even if git tracked them
     .filter(file => !file.match(/(^|\/)(node_modules|coverage|dist|build)\/|(^|\/)\.git\//))
     // De-duplicate (replaces `sort -u`); insertion order keeps first-seen wins
@@ -244,12 +260,12 @@ export function listChangedSourceFiles(baseBranch, root = process.cwd()) {
   return changedFiles;
 }
 
-export function getChangedFiles(BASE_BRANCH, log = console.log, root = process.cwd()) {
+export function getChangedFiles(BASE_BRANCH, log = console.log, root = process.cwd(), options = {}) {
   // Check if BASE_BRANCH exists (also rejects ref-like options before use)
   verifyBaseBranchExists(BASE_BRANCH, root);
 
   try {
-    const changedFiles = listChangedSourceFiles(BASE_BRANCH, root);
+    const changedFiles = listChangedSourceFiles(BASE_BRANCH, root, options);
     log(`Changed files:\n${changedFiles.join('\n')}`);
     return changedFiles;
   } catch (error) {
@@ -264,7 +280,7 @@ export function getChangedFiles(BASE_BRANCH, log = console.log, root = process.c
  * @returns {string}
  */
 export function resolveJestBin(root = process.cwd()) {
-  return path.resolve(root, 'node_modules', 'jest', 'bin', 'jest.js');
+  return jestLoader.resolveJestBinary(root);
 }
 
 function runJest(jestArgs) {
@@ -297,11 +313,24 @@ function runJest(jestArgs) {
  * @param {string} [root]
  * @param {string[]} [jestArgs] extra Jest CLI flags to append (e.g. `--maxWorkers=2`)
  * @param {string|RegExp|null} [filter] regex matched against the final test paths
+ * @param {{
+ *   engine?: 'native'|'jest'|null,
+ *   discoveryWorkers?: number,
+ *   explain?: boolean,
+ *   fallback?: 'error'|'native',
+ *   discoveryTimeoutMs?: number
+ * }} [engineOptions]
  */
-export function resolveTestPlan(files, mode, depth = 2, root = process.cwd(), jestArgs = [], filter = null) {
+export function resolveTestPlan(files, mode, depth = 2, root = process.cwd(), jestArgs = [], filter = null, engineOptions = {}) {
   const { sourceFiles, testFiles } = separateSourceAndTestFiles(files);
   const filterRegex = parseFilter(filter);
   const extra = parseJestArgs(jestArgs);
+
+  const engine = engineOptions?.engine || (mode === 'smart' ? 'native' : null);
+  const discoveryWorkers = engineOptions?.discoveryWorkers ?? 2;
+  const explain = Boolean(engineOptions?.explain);
+  const fallback = engineOptions?.fallback || 'error';
+  const discoveryTimeoutMs = engineOptions?.discoveryTimeoutMs ?? 120000;
 
   if (mode === 'full') {
     const allTestsToRun = [...testFiles];
@@ -324,61 +353,67 @@ export function resolveTestPlan(files, mode, depth = 2, root = process.cwd(), je
       testsToRun,
       jestTargets,
       jestArgs: ['--findRelatedTests', '--passWithNoTests', '--coverage', ...jestTargets, ...fullExtra],
-      delegatedToJest: true
+      delegatedToJest: true,
+      engine: null,
+      requestedEngine: null,
+      fallbackUsed: false,
+      warnings: [],
+      metrics: null,
+      projects: null,
+      projectMatches: null,
+      explanation: null,
+      jestVersion: null
     };
   }
 
-  // Fast: naming-convention mapping with a direct-import fallback.
-  // Smart: naming-convention mapping plus a depth-limited reverse-dependency walk.
-  const testFilesToRun = new Set(testFiles);
-  const allTestFilesToRun = new Set(testFiles);
-  const mappings = [];
+  if (mode === 'smart' && engine !== 'native' && engine !== 'jest') {
+    const err = new Error(`Invalid smart-mode engine "${engine}". Expected "native" or "jest".`);
+    err.code = 'INVALID_ENGINE';
+    throw err;
+  }
 
-  sourceFiles.forEach(sourceFile => {
-    let relatedTests;
-    let matchType;
-
-    if (mode === 'smart') {
-      relatedTests = findRelatedTestFilesBySource(sourceFile, { maxDepth: depth, root });
-      matchType = `naming + import graph, depth ≤ ${depth}`;
-    } else {
-      relatedTests = findTestFilesForSource(sourceFile, root);
-      matchType = 'naming convention';
-
-      if (relatedTests.length === 0) {
-        relatedTests = findTestFilesByImport(sourceFile, root);
-        if (relatedTests.length > 0) {
-          matchType = 'import scan';
-        }
+  if (mode === 'smart' && engine === 'jest') {
+    try {
+      return resolveJestPlan({
+        files,
+        mode,
+        depth,
+        root,
+        extraJestArgs: extra,
+        filterRegex,
+        discoveryWorkers,
+        explain,
+        discoveryTimeoutMs
+      });
+    } catch (error) {
+      if (fallback === 'native') {
+        const nativePlan = resolveNativePlan({
+          files,
+          mode,
+          depth,
+          root,
+          extraJestArgs: extra,
+          filterRegex
+        });
+        return {
+          ...nativePlan,
+          requestedEngine: 'jest',
+          fallbackUsed: true,
+          warnings: [`Jest discovery failed (${error.message}); falling back to native engine.`]
+        };
       }
+      throw error;
     }
+  }
 
-    const filteredTests = filterTestFiles(relatedTests, filterRegex);
-    mappings.push({
-      source: sourceFile,
-      tests: filteredTests,
-      allTests: [...relatedTests],
-      matchType
-    });
-    relatedTests.forEach(test => allTestFilesToRun.add(test));
-    filteredTests.forEach(test => testFilesToRun.add(test));
-  });
-
-  const allTestsToRun = Array.from(allTestFilesToRun);
-  const testsToRun = filterTestFiles(allTestsToRun, filterRegex);
-  return {
+  return resolveNativePlan({
+    files,
     mode,
     depth,
-    filter: filterRegex ? filterRegex.source : null,
-    sourceFiles,
-    testFiles,
-    mappings,
-    allTestsToRun,
-    testsToRun,
-    jestTargets: testsToRun,
-    jestArgs: ['--passWithNoTests', '--coverage', ...testsToRun, ...extra],
-    delegatedToJest: false
-  };
+    root,
+    extraJestArgs: extra,
+    filterRegex
+  });
 }
 
 function hasJestPathPattern(jestArgs) {
@@ -410,7 +445,24 @@ function logFilteredTestFiles(plan, log = console.log) {
   }
 }
 
-function runRelatedTests(files, mode, depth = 2, jestArgs = [], filter = null) {
+function logPlanWarnings(plan, log = console.error) {
+  if (!Array.isArray(plan?.warnings) || plan.warnings.length === 0) return;
+  plan.warnings.forEach(warning => log(`⚠️  ${warning}`));
+}
+
+function logPlanExplanations(plan, explain, log = console.error) {
+  if (!explain || !Array.isArray(plan?.explanation) || plan.explanation.length === 0) return;
+  log('\n🧭 Dependency explanations:');
+  plan.explanation.forEach(item => {
+    const pathStr = Array.isArray(item.path) && item.path.length > 0
+      ? item.path.join(' -> ')
+      : `${item.source} -> ${item.test}`;
+    const projectStr = item.projectName ? ` [${item.projectName}]` : '';
+    log(`   ${item.source} -> ${item.test} (depth ${item.depth}, path: ${pathStr})${projectStr}`);
+  });
+}
+
+function runRelatedTests(files, mode, depth = 2, jestArgs = [], filter = null, engineOptions = {}) {
   if (files.length === 0) {
     console.log('✅ No changed source files found.');
     exit(0);
@@ -418,8 +470,10 @@ function runRelatedTests(files, mode, depth = 2, jestArgs = [], filter = null) {
 
   console.log('🔍 Analyzing changed files for optimal test execution...');
 
-  const plan = resolveTestPlan(files, mode, depth, process.cwd(), jestArgs, filter);
+  const plan = resolveTestPlan(files, mode, depth, process.cwd(), jestArgs, filter, engineOptions);
   const { sourceFiles, testFiles } = plan;
+
+  logPlanWarnings(plan, console.warn);
 
   console.log(`\n📊 Changed files breakdown:`);
   console.log(`   Source files: ${sourceFiles.length}`);
@@ -472,12 +526,22 @@ function runRelatedTests(files, mode, depth = 2, jestArgs = [], filter = null) {
     exit(0);
   }
 
+  logPlanExplanations(plan, Boolean(engineOptions?.explain), console.log);
+
   console.log(`\n🧪 Running ${finalTestFiles.length} test file(s):\n`, finalTestFiles.join('\n'));
   console.log('   Files passed to Jest:');
   finalTestFiles.forEach(file => console.log(`     - ${file}`));
 
   if (mode === 'smart') {
-    console.log(`\n📝 Test strategy: smart (naming + reverse imports, depth ≤ ${depth})`);
+    if (plan.engine === 'jest') {
+      const versionLabel = plan.jestVersion ? `Jest ${plan.jestVersion}` : 'Jest';
+      const timingLabel = plan.metrics && typeof plan.metrics.totalMs === 'number'
+        ? `, discovery ${plan.metrics.totalMs}ms`
+        : '';
+      console.log(`\n📝 Test strategy: smart (jest engine, depth ≤ ${depth}, ${versionLabel}${timingLabel})`);
+    } else {
+      console.log(`\n📝 Test strategy: smart (naming + reverse imports, depth ≤ ${depth})`);
+    }
     console.log(`   Test files: ${finalTestFiles.length}`);
     console.log(`   Source files for coverage: ${sourceFiles.length}`);
   } else {
@@ -502,18 +566,25 @@ function runRelatedTests(files, mode, depth = 2, jestArgs = [], filter = null) {
  * @param {string} mode - Execution mode (fast, smart, or full)
  * @param {number} depth - Max reverse-dependency depth for smart mode
  * @param {string|RegExp|null} [filter] regex matched against the final test paths
+ * @param {string[]} [jestArgs] extra Jest CLI flags
+ * @param {object} [engineOptions] engine selection and discovery options
  */
-export function dryRun(files, mode, depth = 2, filter = null) {
+export function dryRun(files, mode, depth = 2, filter = null, jestArgs = [], engineOptions = {}) {
   if (files.length === 0) {
     // Keep stdout a clean file list; informational messages go to stderr.
     console.error('✅ No changed source files found.');
     exit(0);
   }
 
-  const plan = resolveTestPlan(files, mode, depth, process.cwd(), [], filter);
+  const plan = resolveTestPlan(files, mode, depth, process.cwd(), jestArgs, filter, engineOptions);
+
+  logPlanWarnings(plan, console.error);
 
   // Filter diagnostics stay on stderr so stdout remains a clean list.
   logFilteredTestFiles(plan, console.error);
+
+  // Explanations stay on stderr so stdout remains a clean list.
+  logPlanExplanations(plan, Boolean(engineOptions?.explain), console.error);
 
   // Full mode delegates discovery to Jest; without running it, the only
   // guaranteed output is the changed test files themselves.

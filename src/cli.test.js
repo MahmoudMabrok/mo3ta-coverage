@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
+import jestLoader from './engines/jestLoader.cjs';
 import {
   buildMarkdownCoverageReport,
   classifyChangedLineCoverage,
@@ -10,15 +11,35 @@ import {
   formatMissedLinesSummary,
   getChangedFiles,
   getExplicitFiles,
+  listChangedSourceFiles,
   normalizeExplicitFiles,
   parseFilter,
   parseJestArgs,
   parseLcov,
   readExplicitFilesFromFile,
+  resolveJestBin,
   resolveTestPlan,
   summarizeCoverageResult,
   writeMarkdownReport
 } from './cli.js';
+
+const { PACKAGE_ROOT } = jestLoader;
+
+function linkFixtureNodeModules(root) {
+  const targetModules = path.join(PACKAGE_ROOT, 'node_modules');
+  const fixtureModules = path.join(root, 'node_modules');
+  fs.mkdirSync(fixtureModules, { recursive: true });
+  for (const entry of fs.readdirSync(targetModules)) {
+    const src = path.join(targetModules, entry);
+    const dest = path.join(fixtureModules, entry);
+    if (entry === 'jest') {
+      // Copy the small `jest` wrapper package so realpath(jest/package.json) stays inside `root`.
+      fs.cpSync(src, dest, { recursive: true });
+    } else {
+      fs.symlinkSync(src, dest, 'dir');
+    }
+  }
+}
 
 function writeLcovFixture(records) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mo3ta-coverage-'));
@@ -605,5 +626,136 @@ describe('dryRun', () => {
     expect(stdoutLines).toEqual([]);
     expect(stderrLines.some(line => line.includes('after filter (0)'))).toBe(true);
     expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+});
+
+describe('jest engine CLI integration', () => {
+  let tempDir;
+  let originalCwd;
+
+  beforeEach(() => {
+    originalCwd = process.cwd();
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mo3ta-cli-jest-'));
+    fs.writeFileSync(path.join(tempDir, 'package.json'), JSON.stringify({ name: 'fixture', private: true }, null, 2));
+    fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(tempDir, 'specs'), { recursive: true });
+    fs.writeFileSync(path.join(tempDir, 'src', 'leaf.js'), 'exports.leaf = () => 42;\n');
+    fs.writeFileSync(path.join(tempDir, 'src', 'mid.js'), "const { leaf } = require('./leaf');\nexports.mid = () => leaf();\n");
+    fs.writeFileSync(
+      path.join(tempDir, 'specs', 'mid.spec.js'),
+      "const { mid } = require('../src/mid');\ntest('mid', () => expect(mid()).toBe(42));\n"
+    );
+    fs.writeFileSync(
+      path.join(tempDir, 'jest.config.js'),
+      "module.exports = { testMatch: ['**/specs/**/*.spec.js'] };\n"
+    );
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('resolveJestBin delegates to jestLoader and preserves missing-jest fallback path', () => {
+    expect(resolveJestBin(tempDir)).toBe(path.resolve(tempDir, 'node_modules', 'jest', 'bin', 'jest.js'));
+  });
+
+  it('listChangedSourceFiles includes .snap files only when includeSnapshots is true', () => {
+    execSync('git init -b main -q', { cwd: tempDir });
+    execSync('git config user.name "Test"', { cwd: tempDir });
+    execSync('git config user.email "test@example.com"', { cwd: tempDir });
+    execSync('git add -A && git commit -q -m init', { cwd: tempDir });
+
+    fs.mkdirSync(path.join(tempDir, 'specs', '__snapshots__'), { recursive: true });
+    fs.writeFileSync(path.join(tempDir, 'specs', '__snapshots__', 'mid.spec.js.snap'), '// snap\n');
+    execSync('git add specs/__snapshots__/mid.spec.js.snap', { cwd: tempDir });
+
+    expect(listChangedSourceFiles('main', tempDir)).toEqual([]);
+    expect(listChangedSourceFiles('main', tempDir, { includeSnapshots: true })).toEqual([
+      'specs/__snapshots__/mid.spec.js.snap'
+    ]);
+  });
+
+  it('resolveTestPlan uses Jest 30 engine when Jest is installed in the fixture', () => {
+    linkFixtureNodeModules(tempDir);
+
+    const plan = resolveTestPlan(['src/leaf.js'], 'smart', 2, tempDir, [], null, {
+      engine: 'jest',
+      explain: true
+    });
+
+    expect(plan.engine).toBe('jest');
+    expect(plan.requestedEngine).toBe('jest');
+    expect(plan.fallbackUsed).toBe(false);
+    expect(plan.testsToRun).toEqual(['specs/mid.spec.js']);
+    expect(plan.jestArgs).toContain('--runTestsByPath');
+    expect(plan.jestVersion).toMatch(/^30\./);
+    expect(plan.explanation).toEqual([
+      expect.objectContaining({
+        source: 'src/leaf.js',
+        test: 'specs/mid.spec.js',
+        depth: 2,
+        path: ['src/leaf.js', 'src/mid.js', 'specs/mid.spec.js']
+      })
+    ]);
+  });
+
+  it('resolveTestPlan throws JEST_NOT_FOUND when Jest is missing and fallback is error', () => {
+    let caught = null;
+    try {
+      resolveTestPlan(['src/leaf.js'], 'smart', 2, tempDir, [], null, {
+        engine: 'jest',
+        fallback: 'error'
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).not.toBeNull();
+    expect(caught.code).toBe('JEST_NOT_FOUND');
+  });
+
+  it('resolveTestPlan falls back to native engine with a warning when fallback is native', () => {
+    const plan = resolveTestPlan(['src/leaf.js'], 'smart', 2, tempDir, [], null, {
+      engine: 'jest',
+      fallback: 'native'
+    });
+
+    expect(plan.engine).toBe('native');
+    expect(plan.requestedEngine).toBe('jest');
+    expect(plan.fallbackUsed).toBe(true);
+    expect(plan.warnings).toHaveLength(1);
+    expect(plan.warnings[0]).toContain('falling back to native engine');
+    expect(plan.testsToRun).toEqual(['specs/mid.spec.js']);
+  });
+
+  it('dryRun with engine jest and explain prints clean paths to stdout and explanations to stderr', () => {
+    linkFixtureNodeModules(tempDir);
+    process.chdir(tempDir);
+
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation(code => {
+      throw new Error(`exit:${code}`);
+    });
+    const stdoutLines = [];
+    const stderrLines = [];
+    const origLog = console.log;
+    const origError = console.error;
+    console.log = (...args) => stdoutLines.push(args.join(' '));
+    console.error = (...args) => stderrLines.push(args.join(' '));
+
+    try {
+      expect(() => dryRun(['src/leaf.js'], 'smart', 2, null, [], {
+        engine: 'jest',
+        explain: true
+      })).toThrow('exit:0');
+
+      expect(stdoutLines).toEqual(['specs/mid.spec.js']);
+      expect(stderrLines.some(line => line.includes('Dependency explanations'))).toBe(true);
+      expect(stderrLines.some(line => line.includes('src/leaf.js -> specs/mid.spec.js (depth 2, path: src/leaf.js -> src/mid.js -> specs/mid.spec.js)'))).toBe(true);
+    } finally {
+      console.log = origLog;
+      console.error = origError;
+      exitSpy.mockRestore();
+    }
   });
 });
